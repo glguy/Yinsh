@@ -1,7 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Main where
 
-import Control.Lens
 import Control.Monad (mfilter)
 import Data.Foldable (any, fold, foldMap,foldl')
 import Data.Map (Map)
@@ -51,18 +50,18 @@ data PieceKind = Hollow | Solid
   deriving (Eq)
 
 data Piece = Piece
-  { _piecePlayer :: Player
-  , _pieceKind   :: PieceKind
+  { piecePlayer :: Player
+  , pieceKind   :: PieceKind
   }
   deriving (Eq)
 
 data GameState = GameState
-  { _board       :: Map Coord Piece
-  , _cursor      :: Maybe Coord
-  , _turn        :: Player
-  , _mode        :: GameMode
-  , _whiteScore  :: Int
-  , _blackScore  :: Int
+  { board       :: Map Coord Piece
+  , cursor      :: Maybe Coord
+  , turn        :: Player
+  , mode        :: GameMode
+  , whiteScore  :: Int
+  , blackScore  :: Int
   }
 
 data GameMode
@@ -72,16 +71,13 @@ data GameMode
               | GameOver
 
 initialGameState = GameState
-  { _board       = Map.empty
-  , _cursor      = Nothing
-  , _turn        = startingPlayer
-  , _mode        = Setup startingRings
-  , _whiteScore  = 0
-  , _blackScore  = 0
+  { board       = Map.empty
+  , cursor      = Nothing
+  , turn        = startingPlayer
+  , mode        = Setup startingRings
+  , whiteScore  = 0
+  , blackScore  = 0
   }
-
-makeLenses ''GameState
-makeLenses ''Piece
 
 main =
   play
@@ -94,8 +90,8 @@ main =
     handleTick
 
 handleEvents (EventMotion pt) s
-  | inBounds c = cursor ?~ pointCoord pt $ s
-  | otherwise  = cursor .~ Nothing       $ s
+  | inBounds c = s { cursor = Just c }
+  | otherwise  = s { cursor = Nothing }
   where
   c = pointCoord pt
 
@@ -111,27 +107,27 @@ handleTick   _ s = s
 drawGameState s =
   pictures
    [drawTurn s
-   ,foldMap drawCursor (cursor ^$ s)
+   ,foldMap drawCursor (cursor s)
    ,drawMode s
    ,hexGridPicture
-   ,drawBoard (board ^$ s)
+   ,drawBoard (board s)
    ,drawPickFive s
-   ,drawScore White (whiteScore ^$ s) (C (-5) (-2))
-   ,drawScore Black (blackScore ^$ s) (C 3 3)
+   ,drawScore White (whiteScore s) (C (-5) (-2))
+   ,drawScore Black (blackScore s) (C 3 3)
    ]
 
 drawScore who n pos
   = translateC pos
   $ foldMap (\offset -> translate offset 0 $ drawPiece (Piece who Hollow))
-  $ take n [0, 70, 140]
+  $ take n [0, gridSize, 2*gridSize]
 
 drawMode s =
-  case mode ^$ s of
-    PlaceRing c -> drawPieceAt c (Piece (s^.turn) Solid)
+  case mode s of
+    PlaceRing c -> drawPieceAt c (Piece (turn s) Solid)
     _ -> blank
 
 drawPickFive s =
-  case mode ^$ s of
+  case mode s of
     RemoveFive _ xs -> foldMap drawMarker xs
     _ -> blank
 
@@ -150,18 +146,18 @@ drawCursor c = translateC c
              $ color orange
              $ circleSolid solidRadius
 
-drawPiece p = color (playerToColor (piecePlayer ^$ p))
-            $ drawToken (pieceKind ^$ p)
+drawPiece p = color (playerToColor (piecePlayer p))
+            $ drawToken (pieceKind p)
 
 drawToken Hollow = thickCircle ringRadius ringWidth
 drawToken Solid  = circleSolid solidRadius
 
 drawTurn s       = translateC turnIndicatorCoord
-                 $ case mode ^$ s of
-                     Setup n            -> drawPiece (Piece (s^.turn) Hollow)
+                 $ case mode s of
+                     Setup n            -> drawPiece (Piece (turn s) Hollow)
                                         <> drawCounter n
-                     PickRing           -> drawPiece (Piece (s^.turn) Solid)
-                     PlaceRing {}       -> drawPiece (Piece (s^.turn) Hollow)
+                     PickRing           -> drawPiece (Piece (turn s) Solid)
+                     PlaceRing {}       -> drawPiece (Piece (turn s) Hollow)
                      RemoveFive w _     -> drawPiece (Piece w Solid)
                                         <> drawMarker (C 0 0)
                      RemoveRing w       -> drawPiece (Piece w Hollow)
@@ -213,72 +209,73 @@ coordLine = line . map coordPoint
 --
 
 playMove c s =
-  case mode ^$ s of
+  case mode s of
     Setup n
-      | available (board ^$ s) c ->
+      | available (board s) c ->
           endSetupTurn n
-        $ turn %~ toggleTurn
-        $ board.at c ?~ Piece (turn ^$ s) Hollow
-        $ s
-      | otherwise -> s
+          s { turn = toggleTurn $ turn s
+            , board = Map.insert c (Piece (turn s) Hollow)
+                    $ board s
+            }
 
     PickRing
-      | s^.board.at c == Just (Piece (s^.turn) Hollow) ->
-            mode .~ PlaceRing c $ s
-      | otherwise -> s
+      | clickedPiece == Just (Piece (turn s) Hollow) ->
+            s { mode = PlaceRing c }
 
     PlaceRing ring
-      | s^.board.at c == Just (Piece (s^.turn) Hollow) ->
-            mode .~ PlaceRing c $ s
-      | legalMove ring c (board ^$ s) ->
+      | clickedPiece == Just (Piece (turn s) Hollow) ->
+            s { mode = PlaceRing c }
+
+      | legalMove ring c (board s) ->
            endTurn
-         $ board.at ring ?~ Piece (s^.turn) Solid
-         $ board.at c    ?~ Piece (s^.turn) Hollow
-         $ board         %~ flipThrough (movesThrough ring c)
-         $ s
-      | otherwise -> s
+           s { board = Map.insert ring (Piece (turn s) Solid)
+                     $ Map.insert c    (Piece (turn s) Hollow)
+                     $ flipThrough (movesThrough ring c)
+                     $ board s
+             }
 
     RemoveFive who chosen
-      | s^.board.at c == Just expected ->
-            removeFiveLogic who s (contains c %~ not $ chosen)
-      | otherwise -> s
-      where
-      expected = Piece who Solid
+      | clickedPiece == Just (Piece who Solid) ->
+            removeFiveLogic who s (toggleMembership c chosen)
 
     RemoveRing who
-      | s^.board.at c == Just expected ->
-           endTurn $ board.at c .~ Nothing
-                   $ incScore who
-                   $ s
-      | otherwise -> s
-      where
-      expected = Piece who Hollow
+      | clickedPiece == Just (Piece who Hollow) ->
+           endTurn $ incScore who
+                     s { board = Map.delete c $ board s }
 
-    GameOver -> s
+    _ -> s
 
-incScore White = whiteScore +~ 1
-incScore Black = blackScore +~ 1
+  where
+  clickedPiece = Map.lookup c (board s)
+
+toggleMembership c chosen
+  | Set.member c chosen = Set.delete c chosen
+  | otherwise           = Set.insert c chosen
+
+incScore White s = s { whiteScore = whiteScore s + 1 }
+incScore Black s = s { blackScore = blackScore s + 1 }
 
 endTurn s
   -- the current player gets to remove first
-  | s^.whiteScore >= goalScore || s^.blackScore >= goalScore =
-     mode .~ GameOver $ s
+  | whiteScore s >= goalScore || blackScore s >= goalScore =
+     s { mode = GameOver }
 
-  | hasRun (s^.turn) (s^.board) =
-     mode .~ RemoveFive (s^.turn) Set.empty $ s
+  | hasRun (turn s) (board s) =
+     s { mode = RemoveFive (turn s) Set.empty }
 
-  | hasRun other (s^.board) =
-     mode .~ RemoveFive other Set.empty $ s
+  | hasRun other (board s) =
+     s { mode = RemoveFive other Set.empty }
 
-  | otherwise = turn %~ toggleTurn
-              $ mode .~ PickRing
-              $ s
+  | otherwise =
+     s { turn = toggleTurn $ turn s
+       , mode = PickRing
+       }
   where
-  other = toggleTurn $ turn ^$ s
+  other = toggleTurn $ turn s
 
 -- | Search the board for a run of solid pieces long enough
 -- to be removed and owned by the specified player
-hasRun who b = Data.Foldable.any startsRun coords
+hasRun who b = any startsRun coords
   where
   coords = Map.keysSet $ Map.filter (== expected) b
 
@@ -287,7 +284,7 @@ hasRun who b = Data.Foldable.any startsRun coords
   expected = Piece who Solid
 
   startsRunWithDir n c step
-    | coords^.contains c = startsRunWithDir (n+1) (step c) step
+    | Set.member c coords = startsRunWithDir (n+1) (step c) step
     | otherwise = n >= goalRunLength
 
 runDirections =
@@ -305,21 +302,22 @@ testChosenGroup xs = any (check1 xs) runDirections
 removeFiveLogic who s chosen
   | Set.size chosen == goalRunLength
     && testChosenGroup (Set.toList chosen) =
-                mode  .~ RemoveRing who
-              $ board %~ deleteMany chosen
-              $ s
-  | otherwise = mode .~ RemoveFive who chosen $ s 
+         s { mode = RemoveRing who
+           , board = deleteMany chosen $ board s
+           }
+  | otherwise =
+         s { mode = RemoveFive who chosen }
 
 deleteMany xs m = foldl' (\acc i -> Map.delete i acc) m xs
 
 flipThrough xs b = foldl' (\acc i -> flip1 i acc) b xs
   where
-  flip1 i = at i . mapped . piecePlayer %~ toggleTurn
+  flip1 = Map.update (\p -> Just p { piecePlayer = toggleTurn $ piecePlayer p })
 
 legalMove c1 c2 b =
   not (null xs) && available b c2 &&
   all (occupied b) (dropWhile (available b) (tail (init xs))) &&
-  all (\i -> b^..at i.folded.pieceKind /= [Hollow]) (tail xs)
+  all (\i -> fmap pieceKind (Map.lookup i b) /= Just Hollow) (tail xs)
   where
   xs = movesThrough c1 c2
 
@@ -337,7 +335,7 @@ toggleTurn Black = White
 toggleTurn White = Black
 
 endSetupTurn n s
-  | s^.turn == startingPlayer   = mode .~ mode' $ s
+  | turn s == startingPlayer    = s { mode = mode' }
   | otherwise                   = s
   where
   mode' | n == 1        = PickRing

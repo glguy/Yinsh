@@ -18,4 +18,4 @@ cabal-version:       >=1.8
 executable Yinsh
   main-is:             Yinsh.hs
   -- other-modules:       
-  build-depends:       base, lens >=3.0.4, gloss, containers
+  build-depends:       base, gloss, containers
