@@ -8,11 +8,21 @@ import qualified Data.Map as Map
 import Data.Map (Map)
 import Data.Foldable (fold, foldMap)
 
-gridSize :: Float
-gridSize = 50
 
 gridHeights :: [Int]
 gridHeights = [3,6,7,8,9,8,9,8,7,6,3]
+
+startingRings   = 5
+startingPlayer  = White
+
+playerToColor Black = black
+playerToColor White = greyN 0.7
+
+gridSize        = 70
+ringRadius      = 30
+ringWidth       = 7
+solidRadius     = 22
+turnIndicatorCoord = C (-5) 7
 
 data Coord = C Int Int deriving (Ord, Eq)
 
@@ -40,8 +50,8 @@ data GameMode = Setup Int | PickRing | PlaceRing Coord
 initialGameState = GameState
   { _board       = Map.empty
   , _cursor      = Nothing
-  , _turn        = White
-  , _mode        = Setup 2 -- XXX should be 5
+  , _turn        = startingPlayer
+  , _mode        = Setup startingRings
   }
 
 makeLenses ''GameState
@@ -49,7 +59,7 @@ makeLenses ''Piece
 
 main =
   play
-    (InWindow "Yinsh" (500,500) (10,10))
+    (InWindow "Yinsh" (700,700) (10,10))
     white
     0
     initialGameState
@@ -88,31 +98,28 @@ drawMode s =
 
 drawBoard = fold . Map.mapWithKey drawPieceAt
 
-drawCursor c = translateV (coordPoint c)
+drawCursor c = translateC c
              $ color orange
-             $ circleSolid 15
+             $ circleSolid solidRadius
 
 drawPieceAt :: Coord -> Piece -> Picture
-drawPieceAt c p = translateV (coordPoint c)
+drawPieceAt c p = translateC c
                 $ drawPiece  p
 
 drawPiece p = color (playerToColor (piecePlayer ^$ p))
             $ drawToken (pieceKind ^$ p)
 
-drawToken Hollow = thickCircle 20 5
-drawToken Solid  = circleSolid 15
+drawToken Hollow = thickCircle ringRadius ringWidth
+drawToken Solid  = circleSolid solidRadius
 
-drawTurn s       = drawPieceAt (C (-5) 7) (Piece (s^.turn) modePiece)
+drawTurn s       = drawPieceAt turnIndicatorCoord (Piece (s^.turn) modePiece)
   where
   modePiece = case mode ^$ s of
                 Setup _ -> Hollow
                 PickRing -> Solid
                 PlaceRing _ -> Hollow
 
-playerToColor Black = black
-playerToColor White = greyN 0.7
-
-translateV = uncurry translate
+translateC c = uncurry translate (coordPoint c)
 
 coordPoint :: Coord -> Point
 coordPoint (C x y) = (sqrt 3 / 2 * gridSize * fromIntegral x,
@@ -167,11 +174,11 @@ playMove c s =
       | s^.board.at c == Just (Piece (s^.turn) Hollow) ->
             mode .~ PlaceRing c $ s -- change your mind
       | legalMove ring c (board ^$ s) ->
-           turn %~ toggleTurn
-         $ mode .~ PickRing
+           turn          %~ toggleTurn
+         $ mode          .~ PickRing
          $ board.at ring ?~ Piece (s^.turn) Solid
          $ board.at c    ?~ Piece (s^.turn) Hollow
-         $ board %~ flipThrough (movesThrough ring c)
+         $ board         %~ flipThrough (movesThrough ring c)
          $ s
       | otherwise -> s
 
@@ -198,10 +205,10 @@ toggleTurn Black = White
 toggleTurn White = Black
 
 advanceSetup s =
-  case (s^.mode,s^.turn) of
-    (Setup 1, White) -> mode .~ PickRing $ s
-    (Setup n, White) -> mode .~ Setup (n-1) $ s
-    _                -> s
+  case s^.mode of
+    Setup 1 | s^.turn == startingPlayer -> mode .~ PickRing    $ s
+    Setup n | s^.turn == startingPlayer -> mode .~ Setup (n-1) $ s
+    _                                   -> s
 
 occupied  b c = Map.member c b
 available b c = not $ Map.member c b
