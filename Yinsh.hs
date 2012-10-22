@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
 module Main where
 
 import Control.Monad (mfilter)
@@ -68,12 +67,14 @@ data GameState = GameState
   , timer       :: Float
   }
 
+data Phase = PreTurn | PostTurn deriving Eq
+
 data GameMode
   = Setup Int  -- ^ Players take turns placing their rings
   | PickRing   -- ^ Player choses a ring to place a solid in
   | PlaceRing Coord -- ^ Player choses a place to move his ring to
-  | RemoveFive Player (Set Coord) -- ^ Player selects run of 5 to remove
-  | RemoveRing Player -- ^ Player selects ring to remove
+  | RemoveFive Phase (Set Coord) -- ^ Player selects run of 5 to remove
+  | RemoveRing Phase -- ^ Player selects ring to remove
   | GameOver          -- ^ Game over, no more moves
 
 initialGameState :: GameState
@@ -181,14 +182,15 @@ drawToken Solid  = circleSolid solidRadius
 
 drawTurn s                      = translateC turnIndicatorCoord pic
   where
+  me  = turn s
   pic = case mode s of
-          Setup n               -> drawPiece (Piece (turn s) Ring)
+          Setup n               -> drawPiece (Piece me Ring)
                                 <> drawCounter n
-          PickRing              -> drawPiece (Piece (turn s) Solid)
-          PlaceRing {}          -> drawPiece (Piece (turn s) Ring)
-          RemoveFive w _        -> drawPiece (Piece w Solid)
+          PickRing              -> drawPiece (Piece me Solid)
+          PlaceRing {}          -> drawPiece (Piece me Ring)
+          RemoveFive {}         -> drawPiece (Piece me Solid)
                                 <> drawMarker (C 0 0)
-          RemoveRing w          -> drawPiece (Piece w Ring)
+          RemoveRing w          -> drawPiece (Piece me Ring)
                                 <> drawMarker (C 0 0)
           GameOver              -> blank
 
@@ -254,38 +256,39 @@ playMove c s =
   case mode s of
     Setup n | available (board s) c
                                 -> endSetupTurn n
-                                   s { board = Map.insert c (Piece (turn s) Ring)
+                                   s { board = Map.insert c (Piece me Ring)
                                              $ board s
-                                     , turn  = toggleTurn $ turn s
+                                     , turn  = toggleTurn me
                                      , timer = 0
                                      }
 
-    PickRing | clickedPiece == Just (Piece (turn s) Ring)
+    PickRing | clickedPiece == Just (Piece me Ring)
                                 -> s { mode = PlaceRing c }
 
-    PlaceRing _ | clickedPiece == Just (Piece (turn s) Ring)
+    PlaceRing _ | clickedPiece == Just (Piece me Ring)
                                 -> s { mode = PlaceRing c }
 
     PlaceRing ring | clickedPiece == Nothing && legalMove ring c (board s)
-                                -> endTurn
-                                   s { board = Map.insert ring (Piece (turn s) Solid)
-                                             $ Map.insert c    (Piece (turn s) Ring)
+                                -> endTurn PostTurn
+                                   s { board = Map.insert ring (Piece me Solid)
+                                             $ Map.insert c    (Piece me Ring)
                                              $ flipThrough (movesThrough ring c)
                                              $ board s
                                      }
 
-    RemoveFive who chosen | clickedPiece == Just (Piece who Solid)
-                                -> removeFiveLogic who s
+    RemoveFive phase chosen | clickedPiece == Just (Piece me Solid)
+                                -> removeFiveLogic phase s
                                  $ toggleMembership c chosen
 
-    RemoveRing who | clickedPiece == Just (Piece who Ring)
-                                -> endTurn
-                                 $ incScore who
+    RemoveRing phase | clickedPiece == Just (Piece me Ring)
+                                -> endTurn phase
+                                 $ incScore
                                    s { board = Map.delete c $ board s }
 
     _                           -> s -- ignore all other selections
 
   where
+  me                            = turn s
   clickedPiece                  = Map.lookup c $ board s
 
 -- | Remove element from a set if it is a member, add it otherwise
@@ -294,23 +297,23 @@ toggleMembership c chosen
   | Set.member c chosen         = Set.delete c chosen
   | otherwise                   = Set.insert c chosen
 
--- | Add a point to the given player's score
-incScore                       :: Player -> GameState -> GameState
-incScore White s                = s { whiteScore = whiteScore s + 1 }
-incScore Black s                = s { blackScore = blackScore s + 1 }
+-- | Add a point to the current player's score
+incScore                       :: GameState -> GameState
+incScore s = case turn s of
+               White            -> s { whiteScore = whiteScore s + 1 }
+               Black            -> s { blackScore = blackScore s + 1 }
 
 -- | Update game state at the end of a turn. All runs will be
 -- removed before the game advances to the next player's turn.
-endTurn                        :: GameState -> GameState
-endTurn s
-  -- the current player gets to remove first
+endTurn                        :: Phase -> GameState -> GameState
+endTurn phase s
   | whiteScore s >= goalScore || blackScore s >= goalScore
                                 = s { mode = GameOver }
-  | hasRun (turn s) (board s)   = s { mode = RemoveFive (turn s) Set.empty }
-  | hasRun other (board s)      = s { mode = RemoveFive other Set.empty }
-  | otherwise                   = s { mode = PickRing, turn = other, timer = 0 }
-  where
-  other                         = toggleTurn $ turn s
+  | hasRun (turn s) (board s)   = s { mode = RemoveFive phase Set.empty }
+  | phase == PreTurn            = s { mode = PickRing }
+  -- This player's turn is over
+  | otherwise                   = endTurn PreTurn
+                                  s { timer = 0, turn = toggleTurn $ turn s }
 
 -- | Search the board for a run of solid pieces long enough
 -- to be removed and owned by the specified player
@@ -342,13 +345,13 @@ testChosenGroup xs              = any (check1 xs) runDirections
 -- | Update game state as the set of chosen pieces changes when picking
 -- a run to remove from the board. If the player has selected a run,
 -- remove it from the board and advance the game.
-removeFiveLogic                :: Player -> GameState -> Set Coord -> GameState
-removeFiveLogic who s chosen
+removeFiveLogic                :: Phase -> GameState -> Set Coord -> GameState
+removeFiveLogic phase s chosen
   | Set.size chosen == goalRunLength && testChosenGroup (Set.toList chosen)
-                                = s { mode      = RemoveRing who
+                                = s { mode      = RemoveRing phase
                                     , board     = deleteMany chosen $ board s
                                     }
-  | otherwise                   = s { mode      = RemoveFive who chosen }
+  | otherwise                   = s { mode      = RemoveFive phase chosen }
 
 -- | Delete many elements from a Map.
 deleteMany                     :: Set Coord -> Map Coord Piece -> Map Coord Piece
