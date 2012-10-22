@@ -6,7 +6,8 @@ import Data.Map (Map)
 import Data.Monoid ((<>))
 import Data.Set (Set)
 import Graphics.Gloss.Interface.Pure.Game
-import Graphics.Gloss.Data.Vector (mulSV)
+import Graphics.Gloss.Data.Vector (mulSV, argV, magV)
+import Graphics.Gloss.Geometry.Angle (radToDeg)
 import Prelude hiding (any)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -28,6 +29,7 @@ startingPlayer  = White
 
 playerToColor Black = black
 playerToColor White = makeColor8 214 51 157 255 -- pinkish
+cursorColor         = cyan
 gridSize        = 70
 ringRadius      = 30
 ringWidth       = 7
@@ -140,17 +142,17 @@ isPreflip _                     = False
 
 -- | Render a picture for the whole game.
 drawGameState                  :: GameState -> Picture
-drawGameState                   = fold
+drawGameState s                 = fold
                                 [ drawTimer . timer
                                 , drawTurn
-                                , foldMap drawCursor . cursor
+                                , foldMap (drawCursor s) . cursor
                                 , const hexGridPicture
                                 , drawPieceInRing
                                 , drawBoard
                                 , drawPickFive . mode
                                 , drawScore White . whiteScore
                                 , drawScore Black . blackScore
-                                ]
+                                ] s
 
 -- | Draw a timer in the bottom of the screen to indicate how long a player's
 -- turn has been going.
@@ -208,10 +210,23 @@ drawPieceAt mbTrans c           = translateC c . drawPiece mbTrans
 
 -- | Draw a cursor image showing the player which coordinate their
 -- cursor is hovering over.
-drawCursor                     :: Coord -> Picture
-drawCursor c                    = translateC c
-                                $ color orange
+drawCursor                     :: GameState -> Coord -> Picture
+drawCursor g c
+  | PlaceRing ring <- mode g
+  , legalMove ring c (board g) = pictures
+                                  [ color cursorColor
+                                  $ thickLine 5 [ coordPoint ring, coordPoint c ]
+                                  , drawPieceAt c (Piece (turn g) Ring)
+                                  ]
+
+drawCursor g c                  = translateC c
+                                $ color col
                                 $ circleSolid solidRadius
+  where col = case Map.lookup c (board g) of
+                Just p | pieceKind p == Ring && piecePlayer p == turn g
+                                  -> playerToColor (turn g)
+                _ -> cursorColor
+
 
 -- | Draw a game piece at the origin.
 drawPiece                      :: Maybe (Float, Transition) -> Piece -> Picture
@@ -256,7 +271,7 @@ drawCounter                     = translate (-7) (-10)
 
 -- | Translate a picture to its hex coordinate location.
 translateC                     :: Coord -> Picture -> Picture
-translateC c                    = uncurry translate (coordPoint c)
+translateC c                    = translateV (coordPoint c)
 
 -- | Convert a hex coordinate to a screen coordinate.
 coordPoint                     :: Coord -> Point
@@ -442,6 +457,7 @@ flipThrough xs b                = foldl' (\acc i -> flipAt i acc) b xs
 -- solid pieces.
 legalMove                      :: Coord -> Coord -> Map Coord Piece -> Bool
 legalMove c1 c2 b               = not (null xs) -- check for non-straight move
+                               && Map.lookup c2 b == Nothing
                                && ( all       (== Just Solid)
                                   $ dropWhile (== Nothing)
                                   $ map checkKind $ tail $ init xs)
@@ -476,3 +492,24 @@ endSetupTurn n s
   where
   mode' | n == 1                = PickRing
         | otherwise             = Setup (n-1)
+
+
+
+--------------------------------------------------------------------------------
+
+thickLine h xs                  = pictures $ zipWith (thickSegment h) xs
+                                           $ drop 1 xs
+
+thickSegment h v1 v2            = translateV (addV v1 (mulSV (1/2)  dv))
+                                $ rotate (negate $ radToDeg (argV dv))
+                                $ rectangleSolid w h
+  where
+  dv                            = subV v2 v1
+  w                             = magV dv
+
+translateV                      = uncurry translate
+
+addV (x1,y1) (x2,y2)            = (x1+x2,y1+y2)
+
+subV (x1,y1) (x2,y2)            = (x1-x2,y1-y2)
+
