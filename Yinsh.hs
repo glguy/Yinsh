@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternGuards #-}
 module Main where
 
 import Control.Monad (mfilter)
@@ -216,7 +217,7 @@ drawCursor g c
   , legalMove ring c (board g) = pictures
                                   [ color cursorColor
                                   $ thickLine 5 [ coordPoint ring, coordPoint c ]
-                                  , drawPieceAt c (Piece (turn g) Ring)
+                                  , drawPieceAt Nothing c (Piece (turn g) Ring)
                                   ]
 
 drawCursor g c                  = translateC c
