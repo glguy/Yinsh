@@ -124,17 +124,17 @@ handleTick elapsed s            = s { timer = elapsed + timer s }
 
 -- | Render a picture for the whole game.
 drawGameState                  :: GameState -> Picture
-drawGameState                   = fold
+drawGameState s                 = fold
                                 [ drawTimer . timer
                                 , drawTurn
-                                , foldMap drawCursor . cursor
+                                , foldMap (drawCursor s) . cursor
                                 , drawPieceInRing
                                 , const hexGridPicture
                                 , drawBoard . board
                                 , drawPickFive . mode
                                 , drawScore White . whiteScore
                                 , drawScore Black . blackScore
-                                ]
+                                ] s
 
 -- | Draw a timer in the bottom of the screen to indicate how long a player's
 -- turn has been going.
@@ -191,10 +191,18 @@ drawPieceAt c                   = translateC c . drawPiece
 
 -- | Draw a cursor image showing the player which coordinate their
 -- cursor is hovering over.
-drawCursor                     :: Coord -> Picture
-drawCursor c                    = translateC c
-                                $ color orange
+drawCursor                     :: GameState -> Coord -> Picture
+drawCursor g c
+  | PlaceRing ring <- mode g
+  , legalMove ring c (board g) = drawPieceAt c (Piece (turn g) Ring)
+
+drawCursor g c                  = translateC c
+                                $ color col
                                 $ circleSolid solidRadius
+  where col = case Map.lookup c (board g) of
+                Just p | pieceKind p == Ring && piecePlayer p == turn g
+                                  -> playerToColor (turn g)
+                _ -> orange
 
 -- | Draw a game piece at the origin.
 drawPiece                      :: Piece -> Picture
@@ -398,6 +406,7 @@ flipThrough xs b                = foldl' (\acc i -> flipAt i acc) b xs
 -- solid pieces.
 legalMove                      :: Coord -> Coord -> Map Coord Piece -> Bool
 legalMove c1 c2 b               = not (null xs) -- check for non-straight move
+                               && c1 /= c2
                                && ( all       (== Just Solid)
                                   $ dropWhile (== Nothing)
                                   $ map checkKind $ tail $ init xs)
