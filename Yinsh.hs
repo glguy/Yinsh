@@ -393,10 +393,14 @@ flipThrough xs b                = foldl' (\acc i -> flipAt i acc) b xs
   flipPiece p                   = p { piecePlayer = toggleTurn $ piecePlayer p }
 
 -- | Check that it is legal to move a ring between two coordinates.
+-- A legal move runs on a straight line and and spaces between the
+-- start and end must zero or more empty spaces followed by zero or more
+-- solid pieces.
 legalMove                      :: Coord -> Coord -> Map Coord Piece -> Bool
 legalMove c1 c2 b               = not (null xs) -- check for non-straight move
-                               && all (\i -> checkKind i == Just Solid)
-                                      (dropWhile (available b) (tail (init xs)))
+                               && ( all       (== Just Solid)
+                                  $ dropWhile (== Nothing)
+                                  $ map checkKind $ tail $ init xs)
   where
   xs                            = movesThrough c1 c2
   checkKind c                   = fmap pieceKind $ Map.lookup c b
@@ -428,7 +432,3 @@ endSetupTurn n s
   where
   mode' | n == 1                = PickRing
         | otherwise             = Setup (n-1)
-
--- | Return 'True' when the coordinate is empty in the given board.
-available                      :: Map Coord Piece -> Coord -> Bool
-available b c                   = Map.notMember c b
