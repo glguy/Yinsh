@@ -282,7 +282,7 @@ lineC                           = line . map coordPoint
 playMove                       :: Coord -> GameState -> GameState
 playMove c s =
   case mode s of
-    Setup n | available (board s) c
+    Setup n | clickedPiece == Nothing
                                -> endSetupTurn n
                                   s { board = Map.insert c (Piece me Ring)
                                             $ board s
@@ -364,9 +364,9 @@ runDirections                   = [\(C x y) -> C (x+1) y
                                   ]
 
 -- | Test if the given list of ordered coordinates froms a run
-testChosenGroup                :: [Coord] -> Bool
-testChosenGroup xs              = Set.size chosen == goalRunLength
-                               && any (check1 xs) runDirections
+testChosenGroup                :: Set Coord -> Bool
+testChosenGroup xs              = Set.size xs == goalRunLength
+                               && any (check1 (Set.toAscList xs)) runDirections
   where
   check1 (x:y:z) step           = step x == y && check1 (y:z) step
   check1 _ _                    = True
@@ -376,8 +376,7 @@ testChosenGroup xs              = Set.size chosen == goalRunLength
 -- remove it from the board and advance the game.
 removeFiveLogic                :: Phase -> GameState -> Set Coord -> GameState
 removeFiveLogic phase s chosen
-  | testChosenGroup $ Set.toList chosen
-                                = s { mode      = RemoveRing phase
+  | testChosenGroup chosen      = s { mode      = RemoveRing phase
                                     , board     = deleteMany chosen $ board s
                                     }
   | otherwise                   = s { mode      = RemoveFive phase chosen }
