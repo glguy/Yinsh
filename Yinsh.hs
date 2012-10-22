@@ -462,7 +462,7 @@ thickLine h xs                  = pictures $ zipWith (thickSegment h) xs
                                            $ drop 1 xs
 
 thickSegment h v1 v2            = translateV (addV v1 (mulSV (1/2)  dv))
-                                $ rotate (radToDeg (argV dv))
+                                $ rotate (negate $ radToDeg (argV dv))
                                 $ rectangleSolid w h
   where
   dv                            = subV v2 v1
