@@ -32,6 +32,7 @@ gridSize        = 70
 ringRadius      = 30
 ringWidth       = 7
 solidRadius     = 22
+timerLength     = 60 -- seconds
 turnIndicatorCoord = C (-5) 7
 windowSize      = (700,700)
 windowLocation  = (10,10)
@@ -41,12 +42,14 @@ windowTitle     = "Yinsh"
 -- Type definitions
 --
 
-data Coord = C Int Int deriving (Ord, Eq)
+-- | Location on the hex grid
+data Coord = C Int Int
+  deriving (Ord, Eq)
 
 data Player = Black | White
   deriving (Eq)
 
-data PieceKind = Hollow | Solid
+data PieceKind = Ring | Solid
   deriving (Eq)
 
 data Piece = Piece
@@ -62,14 +65,18 @@ data GameState = GameState
   , mode        :: GameMode
   , whiteScore  :: Int
   , blackScore  :: Int
+  , timer       :: Float
   }
 
 data GameMode
-  = Setup Int | PickRing | PlaceRing Coord
-              | RemoveFive Player (Set Coord)
-              | RemoveRing Player
-              | GameOver
+  = Setup Int  -- ^ Players take turns placing their rings
+  | PickRing   -- ^ Player choses a ring to place a solid in
+  | PlaceRing Coord -- ^ Player choses a place to move his ring to
+  | RemoveFive Player (Set Coord) -- ^ Player selects run of 5 to remove
+  | RemoveRing Player -- ^ Player selects ring to remove
+  | GameOver          -- ^ Game over, no more moves
 
+initialGameState :: GameState
 initialGameState = GameState
   { board       = Map.empty
   , cursor      = Nothing
@@ -77,269 +84,316 @@ initialGameState = GameState
   , mode        = Setup startingRings
   , whiteScore  = 0
   , blackScore  = 0
+  , timer       = 0
   }
 
-main =
-  play
-    (InWindow windowTitle windowSize windowLocation)
-    white
-    0
-    initialGameState
-    drawGameState
-    handleEvents
-    handleTick
+main                            = play (InWindow windowTitle windowSize windowLocation)
+                                       white
+                                       1
+                                       initialGameState
+                                       drawGameState
+                                       handleEvents
+                                       handleTick
 
+--
+-- Game event logic
+--
+
+handleEvents                   :: Event -> GameState -> GameState
 handleEvents (EventMotion pt) s
-  | inBounds c = s { cursor = Just c }
-  | otherwise  = s { cursor = Nothing }
+  | inBounds c                  = s { cursor = Just c }
+  | otherwise                   = s { cursor = Nothing }
   where
-  c = pointCoord pt
+  c                             = pointCoord pt
 
 handleEvents (EventKey (MouseButton LeftButton) Down _ pt) s
-  | inBounds c = playMove c s
+  | inBounds c                  = playMove c s
   where
-  c = pointCoord pt
+  c                             = pointCoord pt
 
-handleEvents _ s = s
+handleEvents _ s                = s
 
-handleTick   _ s = s
+handleTick                     :: Float -> GameState -> GameState
+handleTick elapsed s            = s { timer = elapsed + timer s }
 
-drawGameState s =
-  pictures
-   [drawTurn s
-   ,foldMap drawCursor (cursor s)
-   ,drawMode s
-   ,hexGridPicture
-   ,drawBoard (board s)
-   ,drawPickFive s
-   ,drawScore White (whiteScore s) (C (-5) (-2))
-   ,drawScore Black (blackScore s) (C 3 3)
-   ]
+--
+-- Game rendering
+--
 
-drawScore who n pos
-  = translateC pos
-  $ foldMap (\offset -> translate offset 0 $ drawPiece (Piece who Hollow))
-  $ take n [0, gridSize, 2*gridSize]
+-- | Render a picture for the whole game.
+drawGameState                  :: GameState -> Picture
+drawGameState                   = fold
+                                [ drawTimer . timer
+                                , drawTurn
+                                , foldMap drawCursor . cursor
+                                , drawPieceInRing
+                                , const hexGridPicture
+                                , drawBoard . board
+                                , drawPickFive . mode
+                                , drawScore White (C (-5) (-2)) . whiteScore
+                                , drawScore Black (C 3 3)       . blackScore
+                                ]
 
-drawMode s =
-  case mode s of
-    PlaceRing c -> drawPieceAt c (Piece (turn s) Solid)
-    _ -> blank
 
-drawPickFive s =
-  case mode s of
-    RemoveFive _ xs -> foldMap drawMarker xs
-    _ -> blank
-
-drawMarker coord = translateC coord
-                 $ color yellow
-                 $ rotate 45    bar
-                <> rotate (-45) bar
+drawTimer seconds               = translateC (C 5 (-7)) $ timers seconds timerColors
   where
-  bar = rectangleSolid 10 25
+  timerColors = [yellow,orange,red]
 
-drawBoard = fold . Map.mapWithKey drawPieceAt
+  timers n []                   = blank
+  timers n (c:cs)
+    | n < timerLength           = color c $ arcSolid 0 (n / timerLength * 360) solidRadius
+    | otherwise                 = color c (circleSolid solidRadius) <> timers (n-timerLength) cs
 
-drawPieceAt c = translateC c . drawPiece
+drawScore who pos n             = translateC pos
+                                $ foldMap (\offset -> translate offset 0 pic)
+                                $ take n [0, gridSize, 2*gridSize]
+  where
+  pic                           = drawPiece (Piece who Ring)
 
-drawCursor c = translateC c
-             $ color orange
-             $ circleSolid solidRadius
+drawPieceInRing s =
+  case mode s of
+    PlaceRing c                 -> drawPieceAt c (Piece (turn s) Solid)
+    _                           -> blank
 
-drawPiece p = color (playerToColor (piecePlayer p))
-            $ drawToken (pieceKind p)
+drawPickFive (RemoveFive _ xs)  = foldMap drawMarker xs
+drawPickFive _                  = blank
 
-drawToken Hollow = thickCircle ringRadius ringWidth
+drawMarker coord                = translateC coord
+                                $ color yellow
+                                $ rotate 45    bar
+                               <> rotate (-45) bar
+  where
+  bar                           = rectangleSolid 10 25
+
+drawBoard                       = fold . Map.mapWithKey drawPieceAt
+
+drawPieceAt c                   = translateC c . drawPiece
+
+drawCursor c                    = translateC c
+                                $ color orange
+                                $ circleSolid solidRadius
+
+drawPiece p                     = color (playerToColor (piecePlayer p))
+                                $ drawToken (pieceKind p)
+
+drawToken Ring = thickCircle ringRadius ringWidth
 drawToken Solid  = circleSolid solidRadius
 
-drawTurn s       = translateC turnIndicatorCoord
-                 $ case mode s of
-                     Setup n            -> drawPiece (Piece (turn s) Hollow)
-                                        <> drawCounter n
-                     PickRing           -> drawPiece (Piece (turn s) Solid)
-                     PlaceRing {}       -> drawPiece (Piece (turn s) Hollow)
-                     RemoveFive w _     -> drawPiece (Piece w Solid)
-                                        <> drawMarker (C 0 0)
-                     RemoveRing w       -> drawPiece (Piece w Hollow)
-                                        <> drawMarker (C 0 0)
-                     GameOver           -> blank
-
-drawCounter   = translate (-7) (-10)
-              . scale 0.2 0.2
-              . text
-              . show
-
-translateC c = uncurry translate (coordPoint c)
-
-coordPoint :: Coord -> Point
-coordPoint (C x y) = (sqrt 3 / 2 * gridSize * fromIntegral x,
-                      gridSize * (fromIntegral y + fromIntegral x / 2))
-
-pointCoord :: Point -> Coord
-pointCoord (x,y) = C (round xc) (round yc)
+drawTurn s                      = translateC turnIndicatorCoord pic
   where
-  xc = 2/(gridSize*sqrt 3) * x
-  yc = y/gridSize-xc/2
+  pic = case mode s of
+          Setup n               -> drawPiece (Piece (turn s) Ring)
+                                <> drawCounter n
+          PickRing              -> drawPiece (Piece (turn s) Solid)
+          PlaceRing {}          -> drawPiece (Piece (turn s) Ring)
+          RemoveFive w _        -> drawPiece (Piece w Solid)
+                                <> drawMarker (C 0 0)
+          RemoveRing w          -> drawPiece (Piece w Ring)
+                                <> drawMarker (C 0 0)
+          GameOver              -> blank
 
-hexGridPicture :: Picture
-hexGridPicture =
-  pictures [onedir
-           ,rotate 120 onedir
-           ,rotate 240 onedir
-           ]
+-- | Render a small number to screen which fits inside a ring.
+drawCounter                    :: Int -> Picture
+drawCounter                     = translate (-7) (-10)
+                                . scale 0.2 0.2
+                                . text
+                                . show
+
+-- | Translate a picture to its hex coordinate location.
+translateC                     :: Coord -> Picture -> Picture
+translateC c                    = uncurry translate (coordPoint c)
+
+-- | Convert a hex coordinate to a screen coordinate.
+coordPoint                     :: Coord -> Point
+coordPoint (C x y)              = (sqrt 3 / 2 * gridSize * xf,
+                                   gridSize * (yf + xf/2))
   where
-  onedir = pictures
-    [ coordLine [C x ((-x-h)`div`2)
-                ,C x ((-x-h)`div`2+h)]
-    | x <- [negate gameRadius .. gameRadius]
-    , let h = gridHeights !! abs x
-    ]
+  xf                            = fromIntegral x
+  yf                            = fromIntegral y
 
-inBounds (C x y) =
-  abs x <= gameRadius &&
-  colLo <= y && y <= colLo + h
+-- | Covert a screen coordinate to its nearest hex coordinate.
+pointCoord                     :: Point -> Coord
+pointCoord (x,y)                = C (round xc) (round yc)
   where
-  h = gridHeights !! abs x
-  colLo = (-x-h)`div`2
+  xc                            = 2/(gridSize*sqrt 3) * x
+  yc                            = y/gridSize-xc/2
 
-coordLine = line . map coordPoint
+-- | Static image of the hexagonal board.
+hexGridPicture                 :: Picture
+hexGridPicture                  = foldMap rotate [0, 60, 120]
+                                $ pictures
+                                [ lineC [C x colLo ,C x (colLo+h)]
+                                | x <- [negate gameRadius .. gameRadius]
+                                , let colLo = (-x-h)`div`2
+                                      h = gridHeights !! abs x
+                                ]
+
+-- | Return 'True' iff a hex coordinate is with-in the board boundaries.
+inBounds                       :: Coord -> Bool
+inBounds (C x y)                = abs x <= gameRadius &&
+                                  colLo <= y && y <= colLo + h
+  where
+  h                             = gridHeights !! abs x
+  colLo                         = (-x-h)`div`2
+
+-- | Draw a line connecting hex coordinates
+lineC                          :: [Coord] -> Picture
+lineC                           = line . map coordPoint
 
 --
 -- Game rules
 --
 
+-- | Update the game state given a selected coordinate.
+playMove                       :: Coord -> GameState -> GameState
 playMove c s =
   case mode s of
-    Setup n
-      | available (board s) c ->
-          endSetupTurn n
-          s { turn = toggleTurn $ turn s
-            , board = Map.insert c (Piece (turn s) Hollow)
-                    $ board s
-            }
+    Setup n | available (board s) c
+                                -> endSetupTurn n
+                                 $ s { board = Map.insert c (Piece (turn s) Ring)
+                                             $ board s
+                                     , turn  = toggleTurn $ turn s
+                                     , timer = 0
+                                     }
 
-    PickRing
-      | clickedPiece == Just (Piece (turn s) Hollow) ->
-            s { mode = PlaceRing c }
+    PickRing | clickedPiece == Just (Piece (turn s) Ring)
+                                -> s { mode = PlaceRing c }
 
     PlaceRing ring
-      | clickedPiece == Just (Piece (turn s) Hollow) ->
-            s { mode = PlaceRing c }
+      | clickedPiece == Just (Piece (turn s) Ring)
+                                -> s { mode = PlaceRing c }
 
-      | legalMove ring c (board s) ->
-           endTurn
-           s { board = Map.insert ring (Piece (turn s) Solid)
-                     $ Map.insert c    (Piece (turn s) Hollow)
-                     $ flipThrough (movesThrough ring c)
-                     $ board s
-             }
+      | clickedPiece == Nothing && legalMove ring c (board s)
+                                -> endTurn
+                                 $ s { board = Map.insert ring (Piece (turn s) Solid)
+                                             $ Map.insert c    (Piece (turn s) Ring)
+                                             $ flipThrough (movesThrough ring c)
+                                             $ board s
+                                     }
 
-    RemoveFive who chosen
-      | clickedPiece == Just (Piece who Solid) ->
-            removeFiveLogic who s (toggleMembership c chosen)
+    RemoveFive who chosen | clickedPiece == Just (Piece who Solid)
+                                -> removeFiveLogic who s
+                                 $ toggleMembership c chosen
 
-    RemoveRing who
-      | clickedPiece == Just (Piece who Hollow) ->
-           endTurn $ incScore who
-                     s { board = Map.delete c $ board s }
+    RemoveRing who | clickedPiece == Just (Piece who Ring)
+                                -> endTurn
+                                 $ incScore who
+                                 $ s { board = Map.delete c $ board s }
 
-    _ -> s
+    _                           -> s -- ignore all other selections
 
   where
-  clickedPiece = Map.lookup c (board s)
+  clickedPiece                  = Map.lookup c $ board s
 
+-- | Remove element from a set if it is a member, add it otherwise
+toggleMembership               :: Ord a => a -> Set a -> Set a
 toggleMembership c chosen
-  | Set.member c chosen = Set.delete c chosen
-  | otherwise           = Set.insert c chosen
+  | Set.member c chosen         = Set.delete c chosen
+  | otherwise                   = Set.insert c chosen
 
-incScore White s = s { whiteScore = whiteScore s + 1 }
-incScore Black s = s { blackScore = blackScore s + 1 }
+-- | Add a point to the given player's score
+incScore                       :: Player -> GameState -> GameState
+incScore White s                = s { whiteScore = whiteScore s + 1 }
+incScore Black s                = s { blackScore = blackScore s + 1 }
 
+-- | Update game state at the end of a turn. All runs will be
+-- removed before the game advances to the next player's turn.
+endTurn                        :: GameState -> GameState
 endTurn s
   -- the current player gets to remove first
-  | whiteScore s >= goalScore || blackScore s >= goalScore =
-     s { mode = GameOver }
-
-  | hasRun (turn s) (board s) =
-     s { mode = RemoveFive (turn s) Set.empty }
-
-  | hasRun other (board s) =
-     s { mode = RemoveFive other Set.empty }
-
-  | otherwise =
-     s { turn = toggleTurn $ turn s
-       , mode = PickRing
-       }
+  | whiteScore s >= goalScore || blackScore s >= goalScore
+                                = s { mode = GameOver }
+  | hasRun (turn s) (board s)   = s { mode = RemoveFive (turn s) Set.empty }
+  | hasRun other (board s)      = s { mode = RemoveFive other Set.empty }
+  | otherwise                   = s { mode = PickRing, turn = other, timer = 0 }
   where
-  other = toggleTurn $ turn s
+  other                         = toggleTurn $ turn s
 
 -- | Search the board for a run of solid pieces long enough
 -- to be removed and owned by the specified player
-hasRun who b = any startsRun coords
+hasRun                         :: Player -> Map Coord Piece -> Bool
+hasRun who b                    = any startsRun coords
   where
-  coords = Map.keysSet $ Map.filter (== expected) b
-
-  startsRun c = any (startsRunWithDir 0 c) runDirections
-
-  expected = Piece who Solid
+  expected                      = Piece who Solid
+  coords                        = Map.keysSet $ Map.filter (== expected) b
+  startsRun c                   = any (startsRunWithDir 0 c) runDirections
 
   startsRunWithDir n c step
-    | Set.member c coords = startsRunWithDir (n+1) (step c) step
-    | otherwise = n >= goalRunLength
+    | Set.member c coords       = startsRunWithDir (n+1) (step c) step
+    | otherwise                 = n >= goalRunLength
 
-runDirections =
-  [\(C x y) -> C (x+1) y
-  ,\(C x y) -> C x     (y+1)
-  ,\(C x y) -> C (x+1) (y-1)
-  ]
+-- | List of the possible movement functions which count for making runs
+runDirections                  :: [Coord -> Coord]
+runDirections                   = [\(C x y) -> C (x+1) y
+                                  ,\(C x y) -> C x     (y+1)
+                                  ,\(C x y) -> C (x+1) (y-1)
+                                  ]
 
--- expects a sorted list
-testChosenGroup xs = any (check1 xs) runDirections
+-- | Test if the given list of ordered coordinates froms a run
+testChosenGroup                :: [Coord] -> Bool
+testChosenGroup xs              = any (check1 xs) runDirections
   where
-  check1 (x:y:z) step = step x == y && check1 (y:z) step
-  check1 _ _ = True
+  check1 (x:y:z) step           = step x == y && check1 (y:z) step
+  check1 _ _                    = True
 
+-- | Update game state as the set of chosen pieces changes when picking
+-- a run to remove from the board. If the player has selected a run,
+-- remove it from the board and advance the game.
+removeFiveLogic                :: Player -> GameState -> Set Coord -> GameState
 removeFiveLogic who s chosen
-  | Set.size chosen == goalRunLength
-    && testChosenGroup (Set.toList chosen) =
-         s { mode = RemoveRing who
-           , board = deleteMany chosen $ board s
-           }
-  | otherwise =
-         s { mode = RemoveFive who chosen }
+  | Set.size chosen == goalRunLength && testChosenGroup (Set.toList chosen)
+                                = s { mode      = RemoveRing who
+                                    , board     = deleteMany chosen $ board s
+                                    }
+  | otherwise                   = s { mode      = RemoveFive who chosen }
 
-deleteMany xs m = foldl' (\acc i -> Map.delete i acc) m xs
+-- | Delete many elements from a Map.
+deleteMany                     :: Set Coord -> Map Coord Piece -> Map Coord Piece
+deleteMany xs m                 = foldl' (\acc i -> Map.delete i acc) m xs
 
-flipThrough xs b = foldl' (\acc i -> flip1 i acc) b xs
+-- | Flip many pieces over given a collection of eligible coordinates.
+flipThrough                    :: [Coord] -> Map Coord Piece -> Map Coord Piece
+flipThrough xs b                = foldl' (\acc i -> flipAt i acc) b xs
   where
-  flip1 = Map.update (\p -> Just p { piecePlayer = toggleTurn $ piecePlayer p })
+  flipAt                        = Map.update (Just . flipPiece)
+  flipPiece p                   = p { piecePlayer = toggleTurn $ piecePlayer p }
 
-legalMove c1 c2 b =
-  not (null xs) && available b c2 &&
-  all (occupied b) (dropWhile (available b) (tail (init xs))) &&
-  all (\i -> fmap pieceKind (Map.lookup i b) /= Just Hollow) (tail xs)
+-- | Check that it is legal to move a ring between two coordinates.
+legalMove                      :: Coord -> Coord -> Map Coord Piece -> Bool
+legalMove c1 c2 b               = not (null xs) -- check for non-straight move
+                               && all (\i -> checkKind i == Just Solid)
+                                      (dropWhile (available b) (tail (init xs)))
   where
-  xs = movesThrough c1 c2
+  xs                            = movesThrough c1 c2
+  checkKind c                   = fmap pieceKind $ Map.lookup c b
 
+-- | Compute the coordinates between two points (inclusive) if they are on a line.
+movesThrough                   :: Coord -> Coord -> [Coord]
 movesThrough (C x1 y1) (C x2 y2)
-  | x1 == x2  = [C x1 y | y <- enum y1 y2]
-  | y1 == y2  = [C x y1 | x <- enum x1 x2]
-  | (x1-x2) == (y2-y1) = [C x y | (x,y) <- zip (enum x1 x2) (enum y1 y2)]
-  | otherwise = []
+  | x1 == x2                    = [C x1 y | y <- enum y1 y2]
+  | y1 == y2                    = [C x y1 | x <- enum x1 x2]
+  | (x1-x2) == (y2-y1)          = [C x y | (x,y) <- zip (enum x1 x2) (enum y1 y2)]
+  | otherwise                   = []
 
-enum a b
-  | a <= b      = [a,a+1..b]
-  | otherwise   = [a,a-1..b]
+-- | List of numbers between two bounds (inclusive) supporting decrementing
+-- sequences.
+enum a b | a <= b               = [a,a+1..b]
+         | otherwise            = [a,a-1..b]
 
-toggleTurn Black = White
-toggleTurn White = Black
+-- | Returns the other player
+toggleTurn                     :: Player -> Player
+toggleTurn Black                = White
+toggleTurn White                = Black
 
+-- | Update the game state given a number of rings remaining to place during
+-- the startup phase of the game.
+endSetupTurn                   :: Int -> GameState -> GameState
 endSetupTurn n s
   | turn s == startingPlayer    = s { mode = mode' }
   | otherwise                   = s
   where
-  mode' | n == 1        = PickRing
-        | otherwise     = Setup (n-1)
+  mode' | n == 1                = PickRing
+        | otherwise             = Setup (n-1)
 
-occupied  b c = Map.member c b
-available b c = not $ Map.member c b
+available                      :: Map Coord Piece -> Coord -> Bool
+available b c                   = Map.notMember c b
