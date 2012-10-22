@@ -6,6 +6,7 @@ import Data.Map (Map)
 import Data.Monoid ((<>))
 import Data.Set (Set)
 import Graphics.Gloss.Interface.Pure.Game
+import Graphics.Gloss.Data.Vector (mulSV)
 import Prelude hiding (any)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -43,7 +44,7 @@ windowTitle     = "Yinsh"
 
 -- | Location on the hex grid
 data Coord = C Int Int
-  deriving (Ord, Eq)
+  deriving (Ord, Eq, Show)
 
 data Player = Black | White
   deriving (Eq)
@@ -59,6 +60,7 @@ data Piece = Piece
 
 data GameState = GameState
   { board       :: Map Coord Piece
+  , transitions :: Map Coord (Float, Transition)
   , cursor      :: Maybe Coord
   , turn        :: Player
   , mode        :: GameMode
@@ -66,6 +68,8 @@ data GameState = GameState
   , blackScore  :: Int
   , timer       :: Float
   }
+
+data Transition = Moving Coord | Preflip | Flipping deriving (Show)
 
 data Phase = PreTurn | PostTurn deriving Eq
 
@@ -80,6 +84,7 @@ data GameMode
 initialGameState :: GameState
 initialGameState = GameState
   { board       = Map.empty
+  , transitions = Map.empty
   , cursor      = Nothing
   , turn        = startingPlayer
   , mode        = Setup startingRings
@@ -90,7 +95,7 @@ initialGameState = GameState
 
 main                            = play (InWindow windowTitle windowSize windowLocation)
                                        white
-                                       1
+                                       30
                                        initialGameState
                                        drawGameState
                                        handleEvents
@@ -116,8 +121,19 @@ handleEvents _ s                = s
 
 -- | Advance the timers by the given elapsed time.
 handleTick                     :: Float -> GameState -> GameState
-handleTick elapsed s            = s { timer = elapsed + timer s }
+handleTick elapsed s            = s { timer = elapsed + timer s
+                                    , transitions = Map.mapMaybe (tickTransition elapsed)
+                                                  $ transitions s }
 
+tickTransition                 :: Float -> (Float, Transition) -> Maybe (Float, Transition)
+tickTransition elapsed (x, y)
+  | x > elapsed                 = Just (x-elapsed, y)
+  | isPreflip y                 = Just (0.25, Flipping)
+  | otherwise                   = Nothing
+
+isPreflip                      :: Transition -> Bool
+isPreflip Preflip               = True
+isPreflip _                     = False
 --
 -- Game rendering
 --
@@ -130,7 +146,7 @@ drawGameState                   = fold
                                 , foldMap drawCursor . cursor
                                 , const hexGridPicture
                                 , drawPieceInRing
-                                , drawBoard . board
+                                , drawBoard
                                 , drawPickFive . mode
                                 , drawScore White . whiteScore
                                 , drawScore Black . blackScore
@@ -143,7 +159,7 @@ drawTimer seconds               = translateC (C 5 (-7)) $ timers seconds timerCo
   where
   timerColors = [yellow,orange,red]
 
-  timers n []                   = blank
+  timers _ []                   = blank
   timers n (c:cs)
     | n < timerLength           = color c $ arcSolid 0 (n / timerLength * 360) solidRadius
     | otherwise                 = color c (circleSolid solidRadius) <> timers (n-timerLength) cs
@@ -154,7 +170,7 @@ drawScore who n                 = translateC pos
                                 $ foldMap (\offset -> translate offset 0 pic)
                                 $ take n [0, gridSize, 2*gridSize]
   where
-  pic                           = drawPiece (Piece who Ring)
+  pic                           = drawPiece Nothing (Piece who Ring)
   pos = case who of
           White                -> C (-5) (-2)
           Black                -> C 3    3
@@ -163,7 +179,7 @@ drawScore who n                 = translateC pos
 drawPieceInRing                :: GameState -> Picture
 drawPieceInRing s =
   case mode s of
-    PlaceRing c                -> drawPieceAt c (Piece (turn s) Solid)
+    PlaceRing c                -> drawPieceAt Nothing c (Piece (turn s) Solid)
     _                          -> blank
 
 -- | Draw markers over all of the currently selected pieces when selecting
@@ -182,12 +198,13 @@ drawMarker coord                = translateC coord
   bar                           = rectangleSolid 10 25
 
 -- | Draw all the pieces on the board.
-drawBoard                      :: Map Coord Piece -> Picture
-drawBoard                       = fold . Map.mapWithKey drawPieceAt
+drawBoard                      :: GameState -> Picture
+drawBoard s                     = fold . Map.mapWithKey drawWithTransition . board $ s
+  where drawWithTransition c    = drawPieceAt (Map.lookup c $ transitions s) c
 
 -- | Draw a piece at the given hex coordinates.
-drawPieceAt                    :: Coord -> Piece -> Picture
-drawPieceAt c                   = translateC c . drawPiece
+drawPieceAt                    :: Maybe (Float, Transition) -> Coord -> Piece -> Picture
+drawPieceAt mbTrans c           = translateC c . drawPiece mbTrans
 
 -- | Draw a cursor image showing the player which coordinate their
 -- cursor is hovering over.
@@ -197,9 +214,17 @@ drawCursor c                    = translateC c
                                 $ circleSolid solidRadius
 
 -- | Draw a game piece at the origin.
-drawPiece                      :: Piece -> Picture
-drawPiece p                     = color (playerToColor (piecePlayer p))
+drawPiece                      :: Maybe (Float, Transition) -> Piece -> Picture
+drawPiece mbTrans p             = color (playerToColor (piecePlayer p))
+                                $ applyTransition mbTrans
                                 $ drawToken (pieceKind p)
+
+applyTransition Nothing         = id
+applyTransition (Just (t, x))   = case x of
+                                    Moving c ->
+                                      uncurry translate (mulSV t (coordPoint c))
+                                    Preflip -> id
+                                    Flipping -> scale (sin (pi * t / 0.25)) 1
 
 -- | Draw the shape of a game token at the origin.
 drawToken                      :: PieceKind -> Picture
@@ -212,13 +237,13 @@ drawTurn s                      = translateC turnIndicatorCoord pic
   where
   me  = turn s
   pic = case mode s of
-          Setup n              -> drawPiece (Piece me Ring)
+          Setup n              -> drawPiece Nothing (Piece me Ring)
                                <> drawCounter n
-          PickRing             -> drawPiece (Piece me Solid)
-          PlaceRing {}         -> drawPiece (Piece me Ring)
-          RemoveFive {}        -> drawPiece (Piece me Solid)
+          PickRing             -> drawPiece Nothing (Piece me Solid)
+          PlaceRing {}         -> drawPiece Nothing (Piece me Ring)
+          RemoveFive {}        -> drawPiece Nothing (Piece me Solid)
                                <> drawMarker (C 0 0)
-          RemoveRing w         -> drawPiece (Piece me Ring)
+          RemoveRing w         -> drawPiece Nothing (Piece me Ring)
                                <> drawMarker (C 0 0)
           GameOver             -> blank
 
@@ -301,9 +326,12 @@ playMove c s =
                                -> endTurn PostTurn
                                   s { board = Map.insert ring (Piece me Solid)
                                             $ Map.insert c    (Piece me Ring)
-                                            $ flipThrough (movesThrough ring c)
+                                            $ flipThrough affected
                                             $ board s
+                                    , transitions = computeTransitions
+                                                    ring c affected
                                     }
+                        where affected = movesThrough ring c
 
     RemoveFive phase chosen | clickedPiece == Just (Piece me Solid)
                                -> removeFiveLogic phase s
@@ -319,6 +347,21 @@ playMove c s =
   where
   me                            = turn s
   clickedPiece                  = Map.lookup c $ board s
+
+computeTransitions             :: Coord -> Coord -> [Coord] -> Map Coord (Float, Transition)
+computeTransitions c1 c2 xs     = Map.fromList
+                                $  (c2,(1, Moving delta))
+                                : [ (x,(fromIntegral (i :: Int) / fromIntegral distance, Preflip))
+
+                                  | (i,x) <- zip [1..] (tail (init xs))
+                                  ]
+  where
+  delta                         = subCoord c1 c2
+  distance                      = length xs
+
+-- | Subtract two coordinates as vectors.
+subCoord                       :: Coord -> Coord -> Coord
+subCoord (C x1 y1) (C x2 y2)    = C (x1-x2) (y1-y2)
 
 -- | Remove element from a set if it is a member, add it otherwise
 toggleMembership               :: Ord a => a -> Set a -> Set a
