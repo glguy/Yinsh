@@ -28,7 +28,7 @@ startingPlayer  = White
 --
 
 playerToColor Black = black
-playerToColor White = greyN 0.7
+playerToColor White = makeColor8 214 51 157 255 -- pinkish
 gridSize        = 70
 ringRadius      = 30
 ringWidth       = 7
@@ -67,7 +67,6 @@ data GameState = GameState
   , whiteScore  :: Int
   , blackScore  :: Int
   , timer       :: Float
-  , transition  :: Maybe Transition
   }
 
 data Phase = PreTurn | PostTurn deriving Eq
@@ -80,9 +79,6 @@ data GameMode
   | RemoveRing Phase -- ^ Player selects ring to remove
   | GameOver          -- ^ Game over, no more moves
 
-data Transition = MovingRing Coord Coord Int    -- from, to, step number
-
-
 initialGameState :: GameState
 initialGameState = GameState
   { board       = Map.empty
@@ -92,7 +88,6 @@ initialGameState = GameState
   , whiteScore  = 0
   , blackScore  = 0
   , timer       = 0
-  , transition  = Nothing
   }
 
 main                            = play (InWindow windowTitle windowSize windowLocation)
@@ -135,8 +130,8 @@ drawGameState s                 = fold
                                 [ drawTimer . timer
                                 , drawTurn
                                 , foldMap (drawCursor s) . cursor
-                                , drawPieceInRing
                                 , const hexGridPicture
+                                , drawPieceInRing
                                 , drawBoard . board
                                 , drawPickFive . mode
                                 , drawScore White . whiteScore
@@ -270,7 +265,8 @@ pointCoord (x,y)                = C (round xc) (round yc)
 
 -- | Static image of the hexagonal board.
 hexGridPicture                 :: Picture
-hexGridPicture                  = foldMap rotate [0, 60, 120]
+hexGridPicture                  = color (makeColor8 0 0 0 50)
+                                $ foldMap rotate [0, 60, 120]
                                 $ pictures
                                 [ lineC [C x colLo, C x colHi]
                                 | x <- [- gameRadius .. gameRadius]
