@@ -1,17 +1,18 @@
 {-# LANGUAGE PatternGuards #-}
 module Main where
 
-import Control.Monad (mfilter)
 import Data.Foldable (any, fold, foldMap,foldl')
 import Data.Map (Map)
 import Data.Monoid ((<>))
 import Data.Set (Set)
-import Graphics.Gloss.Interface.Pure.Game
 import Graphics.Gloss.Data.Vector (mulSV, argV, magV)
 import Graphics.Gloss.Geometry.Angle (radToDeg)
+import Graphics.Gloss.Interface.Pure.Game
 import Prelude hiding (any)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+
+import DrawToken
 
 --
 -- Game rule parameters
@@ -233,32 +234,28 @@ drawCursor g c                  = translateC c
 
 -- | Draw a game piece at the origin.
 drawPiece                      :: Maybe (Float, Transition) -> Piece -> Picture
-drawPiece mbTrans p             = color (playerToColor (piecePlayer p))
-                                $ applyTransition mbTrans (piecePlayer p)
-                                $ drawToken (pieceKind p)
-
--- | Alter rendering of a picture when a transition is being applied.
-applyTransition                :: Maybe (Float, Transition) -> Player -> Picture -> Picture
-applyTransition Nothing       _ = id
-applyTransition (Just (t, x)) p = case x of
-                                    Moving c ->
-                                        let total = travelTime c
-                                        in uncurry translate (mulSV (t/total) (coordPoint c))
-                                    Preflip -> useOldColor
-                                    Flipping ->
-                                       flipColor . scale (1 - sin (pi * t / flipTime)) 1
+drawPiece mbTrans p             = trans token
   where
-  useOldColor                   = color (playerToColor (toggleTurn p))
-  flipColor | t > flipTime/2    = useOldColor
-            | otherwise         = id
+  player                        = case mbTrans of
+                                    Just (_,Preflip)       -> toggleTurn $ piecePlayer p
+                                    _                      -> piecePlayer p
+
+  cfront                        = playerToColor player
+  cback                         = playerToColor $ toggleTurn player
+
+  trans = case mbTrans of
+    Just (t, Moving c)         -> let total = travelTime c
+                                  in uncurry translate (mulSV (t/total) (coordPoint c))
+    _                          -> id
+
+  token = case (pieceKind p,mbTrans) of
+    (Ring,_)                   -> color cfront $ thickCircle ringRadius ringWidth
+    (Solid, Just (t,Flipping)) -> drawToken solidRadius 10 cback cfront blank (pi/2 * (t - flipTime/2)/flipTime)
+    (Solid, _                ) -> drawToken solidRadius 10 cback cfront blank (-pi/2)
+
 
 travelTime                     :: Coord -> Float
 travelTime coord                = magV (coordPoint coord) / animationSpeed
-
--- | Draw the shape of a game token at the origin.
-drawToken                      :: PieceKind -> Picture
-drawToken Ring                  = thickCircle ringRadius ringWidth
-drawToken Solid                 = circleSolid solidRadius
 
 -- | Draw a picture indicating which mode the game is in.
 drawTurn                       :: GameState -> Picture
@@ -272,7 +269,7 @@ drawTurn s                      = translateC turnIndicatorCoord pic
           PlaceRing {}         -> drawPiece Nothing (Piece me Ring)
           RemoveFive {}        -> drawPiece Nothing (Piece me Solid)
                                <> drawMarker (C 0 0)
-          RemoveRing w         -> color (greyN 0.5) (circleSolid ringRadius)
+          RemoveRing {}        -> color (greyN 0.5) (circleSolid ringRadius)
                                <> drawPiece Nothing (Piece me Ring)
                                <> drawMarker (C 0 0)
           GameOver             -> blank
@@ -492,6 +489,7 @@ movesThrough (C x1 y1) (C x2 y2)
 
 -- | List of numbers between two bounds (inclusive) supporting decrementing
 -- sequences.
+enum                           :: Int -> Int -> [Int]
 enum a b | a <= b               = [a,a+1..b]
          | otherwise            = [a,a-1..b]
 
@@ -514,9 +512,11 @@ endSetupTurn n s
 
 --------------------------------------------------------------------------------
 
+thickLine                      :: Float -> [Point] -> Picture
 thickLine h xs                  = pictures $ zipWith (thickSegment h) xs
                                            $ drop 1 xs
 
+thickSegment                   :: Float -> Point -> Point -> Picture
 thickSegment h v1 v2            = translateV (addV v1 (mulSV (1/2)  dv))
                                 $ rotate (negate $ radToDeg (argV dv))
                                 $ rectangleSolid w h
@@ -524,9 +524,11 @@ thickSegment h v1 v2            = translateV (addV v1 (mulSV (1/2)  dv))
   dv                            = subV v2 v1
   w                             = magV dv
 
+translateV                     :: Vector -> Picture -> Picture
 translateV                      = uncurry translate
 
+addV                           :: Vector -> Vector -> Vector
 addV (x1,y1) (x2,y2)            = (x1+x2,y1+y2)
 
+subV                           :: Vector -> Vector -> Vector
 subV (x1,y1) (x2,y2)            = (x1-x2,y1-y2)
-

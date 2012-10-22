@@ -17,5 +17,5 @@ cabal-version:       >=1.8
 
 executable Yinsh
   main-is:             Yinsh.hs
-  -- other-modules:       
+  other-modules:       DrawToken
   build-depends:       base, gloss, containers
