@@ -29,6 +29,7 @@ startingPlayer  = White
 
 playerToColor Black = black
 playerToColor White = makeColor8 214 51 157 255 -- pinkish
+cursorColor         = cyan
 gridSize        = 70
 ringRadius      = 30
 ringWidth       = 7
@@ -197,7 +198,7 @@ drawCursor                     :: GameState -> Coord -> Picture
 drawCursor g c
   | PlaceRing ring <- mode g
   , legalMove ring c (board g) = pictures
-                                  [ color orange
+                                  [ color cursorColor
                                   $ thickLine 5 [ coordPoint ring, coordPoint c ]
                                   , drawPieceAt c (Piece (turn g) Ring)
                                   ]
@@ -208,7 +209,7 @@ drawCursor g c                  = translateC c
   where col = case Map.lookup c (board g) of
                 Just p | pieceKind p == Ring && piecePlayer p == turn g
                                   -> playerToColor (turn g)
-                _ -> orange
+                _ -> cursorColor
 
 
 -- | Draw a game piece at the origin.
