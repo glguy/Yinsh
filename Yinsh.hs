@@ -6,6 +6,8 @@ import Data.Map (Map)
 import Data.Monoid ((<>))
 import Data.Set (Set)
 import Graphics.Gloss.Interface.Pure.Game
+import Graphics.Gloss.Data.Vector (mulSV, argV, magV)
+import Graphics.Gloss.Geometry.Angle (radToDeg)
 import Prelude hiding (any)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -65,6 +67,7 @@ data GameState = GameState
   , whiteScore  :: Int
   , blackScore  :: Int
   , timer       :: Float
+  , transition  :: Maybe Transition
   }
 
 data Phase = PreTurn | PostTurn deriving Eq
@@ -77,6 +80,9 @@ data GameMode
   | RemoveRing Phase -- ^ Player selects ring to remove
   | GameOver          -- ^ Game over, no more moves
 
+data Transition = MovingRing Coord Coord Int    -- from, to, step number
+
+
 initialGameState :: GameState
 initialGameState = GameState
   { board       = Map.empty
@@ -86,6 +92,7 @@ initialGameState = GameState
   , whiteScore  = 0
   , blackScore  = 0
   , timer       = 0
+  , transition  = Nothing
   }
 
 main                            = play (InWindow windowTitle windowSize windowLocation)
@@ -194,7 +201,11 @@ drawPieceAt c                   = translateC c . drawPiece
 drawCursor                     :: GameState -> Coord -> Picture
 drawCursor g c
   | PlaceRing ring <- mode g
-  , legalMove ring c (board g) = drawPieceAt c (Piece (turn g) Ring)
+  , legalMove ring c (board g) = pictures
+                                  [ color orange
+                                  $ thickLine 5 [ coordPoint ring, coordPoint c ]
+                                  , drawPieceAt c (Piece (turn g) Ring)
+                                  ]
 
 drawCursor g c                  = translateC c
                                 $ color col
@@ -203,6 +214,7 @@ drawCursor g c                  = translateC c
                 Just p | pieceKind p == Ring && piecePlayer p == turn g
                                   -> playerToColor (turn g)
                 _ -> orange
+
 
 -- | Draw a game piece at the origin.
 drawPiece                      :: Piece -> Picture
@@ -239,7 +251,7 @@ drawCounter                     = translate (-7) (-10)
 
 -- | Translate a picture to its hex coordinate location.
 translateC                     :: Coord -> Picture -> Picture
-translateC c                    = uncurry translate (coordPoint c)
+translateC c                    = translateV (coordPoint c)
 
 -- | Convert a hex coordinate to a screen coordinate.
 coordPoint                     :: Coord -> Point
@@ -406,7 +418,7 @@ flipThrough xs b                = foldl' (\acc i -> flipAt i acc) b xs
 -- solid pieces.
 legalMove                      :: Coord -> Coord -> Map Coord Piece -> Bool
 legalMove c1 c2 b               = not (null xs) -- check for non-straight move
-                               && c1 /= c2
+                               && Map.lookup c2 b == Nothing
                                && ( all       (== Just Solid)
                                   $ dropWhile (== Nothing)
                                   $ map checkKind $ tail $ init xs)
@@ -441,3 +453,24 @@ endSetupTurn n s
   where
   mode' | n == 1                = PickRing
         | otherwise             = Setup (n-1)
+
+
+
+--------------------------------------------------------------------------------
+
+thickLine h xs                  = pictures $ zipWith (thickSegment h) xs
+                                           $ drop 1 xs
+
+thickSegment h v1 v2            = translateV (addV v1 (mulSV (1/2)  dv))
+                                $ rotate (radToDeg (argV dv))
+                                $ rectangleSolid w h
+  where
+  dv                            = subV v2 v1
+  w                             = magV dv
+
+translateV                      = uncurry translate
+
+addV (x1,y1) (x2,y2)            = (x1+x2,y1+y2)
+
+subV (x1,y1) (x2,y2)            = (x1-x2,y1-y2)
+
