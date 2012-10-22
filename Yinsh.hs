@@ -222,16 +222,20 @@ pointCoord (x,y)                = C (round xc) (round yc)
 hexGridPicture                 :: Picture
 hexGridPicture                  = foldMap rotate [0, 60, 120]
                                 $ pictures
-                                [ lineC [C x colLo ,C x (colLo+h)]
-                                | x <- [negate gameRadius .. gameRadius]
-                                , let colLo = (-x-h)`div`2
-                                      h = gridHeights !! abs x
+                                [ lineC [C x colLo, C x colHi]
+                                | x <- [- gameRadius .. gameRadius]
+                                , let (colLo,colHi) = columnRange x
                                 ]
 
 -- | Return 'True' iff a hex coordinate is with-in the board boundaries.
 inBounds                       :: Coord -> Bool
 inBounds (C x y)                = abs x <= gameRadius &&
-                                  colLo <= y && y <= colLo + h
+                                  colLo <= y && y <= colHi
+  where
+  (colLo,colHi)                 = columnRange x
+
+columnRange                    :: Int -> (Int,Int)
+columnRange x                   = (colLo, colLo+h)
   where
   h                             = gridHeights !! abs x
   colLo                         = (-x-h)`div`2
@@ -250,7 +254,7 @@ playMove c s =
   case mode s of
     Setup n | available (board s) c
                                 -> endSetupTurn n
-                                 $ s { board = Map.insert c (Piece (turn s) Ring)
+                                   s { board = Map.insert c (Piece (turn s) Ring)
                                              $ board s
                                      , turn  = toggleTurn $ turn s
                                      , timer = 0
@@ -259,13 +263,12 @@ playMove c s =
     PickRing | clickedPiece == Just (Piece (turn s) Ring)
                                 -> s { mode = PlaceRing c }
 
-    PlaceRing ring
-      | clickedPiece == Just (Piece (turn s) Ring)
+    PlaceRing _ | clickedPiece == Just (Piece (turn s) Ring)
                                 -> s { mode = PlaceRing c }
 
-      | clickedPiece == Nothing && legalMove ring c (board s)
+    PlaceRing ring | clickedPiece == Nothing && legalMove ring c (board s)
                                 -> endTurn
-                                 $ s { board = Map.insert ring (Piece (turn s) Solid)
+                                   s { board = Map.insert ring (Piece (turn s) Solid)
                                              $ Map.insert c    (Piece (turn s) Ring)
                                              $ flipThrough (movesThrough ring c)
                                              $ board s
@@ -278,7 +281,7 @@ playMove c s =
     RemoveRing who | clickedPiece == Just (Piece who Ring)
                                 -> endTurn
                                  $ incScore who
-                                 $ s { board = Map.delete c $ board s }
+                                   s { board = Map.delete c $ board s }
 
     _                           -> s -- ignore all other selections
 
