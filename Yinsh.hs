@@ -36,6 +36,8 @@ ringRadius      = 30
 ringWidth       = 7
 solidRadius     = 22
 timerLength     = 60 -- seconds
+animationSpeed  = 200 -- pixels per second
+flipTime        = 0.25
 turnIndicatorCoord = C (-5) 7
 windowSize      = (700,700)
 windowLocation  = (10,10)
@@ -131,7 +133,7 @@ handleTick elapsed s            = s { timer = elapsed + timer s
 tickTransition                 :: Float -> (Float, Transition) -> Maybe (Float, Transition)
 tickTransition elapsed (x, y)
   | x > elapsed                 = Just (x-elapsed, y)
-  | isPreflip y                 = Just (0.25, Flipping)
+  | isPreflip y                 = Just (flipTime, Flipping)
   | otherwise                   = Nothing
 
 isPreflip                      :: Transition -> Bool
@@ -232,15 +234,26 @@ drawCursor g c                  = translateC c
 -- | Draw a game piece at the origin.
 drawPiece                      :: Maybe (Float, Transition) -> Piece -> Picture
 drawPiece mbTrans p             = color (playerToColor (piecePlayer p))
-                                $ applyTransition mbTrans
+                                $ applyTransition mbTrans (piecePlayer p)
                                 $ drawToken (pieceKind p)
 
-applyTransition Nothing         = id
-applyTransition (Just (t, x))   = case x of
+-- | Alter rendering of a picture when a transition is being applied.
+applyTransition                :: Maybe (Float, Transition) -> Player -> Picture -> Picture
+applyTransition Nothing       _ = id
+applyTransition (Just (t, x)) p = case x of
                                     Moving c ->
-                                      uncurry translate (mulSV t (coordPoint c))
-                                    Preflip -> id
-                                    Flipping -> scale (sin (pi * t / 0.25)) 1
+                                        let total = travelTime c
+                                        in uncurry translate (mulSV (t/total) (coordPoint c))
+                                    Preflip -> useOldColor
+                                    Flipping ->
+                                       flipColor . scale (1 - sin (pi * t / flipTime)) 1
+  where
+  useOldColor                   = color (playerToColor (toggleTurn p))
+  flipColor | t > flipTime/2    = useOldColor
+            | otherwise         = id
+
+travelTime                     :: Coord -> Float
+travelTime coord                = magV (coordPoint coord) / animationSpeed
 
 -- | Draw the shape of a game token at the origin.
 drawToken                      :: PieceKind -> Picture
@@ -259,7 +272,8 @@ drawTurn s                      = translateC turnIndicatorCoord pic
           PlaceRing {}         -> drawPiece Nothing (Piece me Ring)
           RemoveFive {}        -> drawPiece Nothing (Piece me Solid)
                                <> drawMarker (C 0 0)
-          RemoveRing w         -> drawPiece Nothing (Piece me Ring)
+          RemoveRing w         -> color (greyN 0.5) (circleSolid ringRadius)
+                               <> drawPiece Nothing (Piece me Ring)
                                <> drawMarker (C 0 0)
           GameOver             -> blank
 
@@ -364,16 +378,18 @@ playMove c s =
   me                            = turn s
   clickedPiece                  = Map.lookup c $ board s
 
+-- | Compute all the timings for the animations for this ring move.
 computeTransitions             :: Coord -> Coord -> [Coord] -> Map Coord (Float, Transition)
 computeTransitions c1 c2 xs     = Map.fromList
-                                $  (c2,(1, Moving delta))
-                                : [ (x,(fromIntegral (i :: Int) / fromIntegral distance, Preflip))
-
+                                $ (c2,(total, Moving delta))
+                                : [ (x,(total * fromIntegral (i :: Int)
+                                              / fromIntegral distance, Preflip))
                                   | (i,x) <- zip [1..] (tail (init xs))
                                   ]
   where
   delta                         = subCoord c1 c2
   distance                      = length xs
+  total                         = travelTime delta
 
 -- | Subtract two coordinates as vectors.
 subCoord                       :: Coord -> Coord -> Coord
