@@ -2,6 +2,7 @@
 module Main where
 
 import Data.Foldable (any, fold, foldMap,foldl')
+import Data.List (sortBy)
 import Data.Map (Map)
 import Data.Monoid ((<>))
 import Data.Set (Set)
@@ -35,12 +36,12 @@ cursorColor         = cyan
 gridSize        = 70
 ringRadius      = 30
 ringWidth       = 7
-solidRadius     = 22
+solidRadius     = 20
 timerLength     = 60 -- seconds
 animationSpeed  = 200 -- pixels per second
 flipTime        = 0.25
 turnIndicatorCoord = C (-5) 7
-windowSize      = (700,700)
+windowSize      = (850,600)
 windowLocation  = (10,10)
 windowTitle     = "Yinsh"
 
@@ -146,16 +147,16 @@ isPreflip _                     = False
 
 -- | Render a picture for the whole game.
 drawGameState                  :: GameState -> Picture
-drawGameState s                 = fold
+drawGameState s                 = scale (sqrt (3/2)) (1/sqrt 2) $ fold
                                 [ drawTimer . timer
                                 , drawTurn
+                                , drawScore White . whiteScore
+                                , drawScore Black . blackScore
                                 , foldMap (drawCursor s) . cursor
                                 , const hexGridPicture
                                 , drawPieceInRing
                                 , drawBoard
                                 , drawPickFive . mode
-                                , drawScore White . whiteScore
-                                , drawScore Black . blackScore
                                 ] s
 
 -- | Draw a timer in the bottom of the screen to indicate how long a player's
@@ -205,8 +206,19 @@ drawMarker coord                = translateC coord
 
 -- | Draw all the pieces on the board.
 drawBoard                      :: GameState -> Picture
-drawBoard s                     = fold . Map.mapWithKey drawWithTransition . board $ s
+drawBoard s                     = foldMap (uncurry drawWithTransition)
+                                . sortBy pieceDrawOrder . Map.assocs . board $ s
   where drawWithTransition c    = drawPieceAt (Map.lookup c $ transitions s) c
+
+pieceDrawOrder                 :: (Coord, Piece) -> (Coord, Piece) -> Ordering
+pieceDrawOrder (c1,p1) (c2,p2)  = compareKinds (pieceKind p1) (pieceKind p2)
+                               <> compareDepth c1 c2
+  where
+  compareKinds Solid Ring       = LT
+  compareKinds Ring  Solid      = GT
+  compareKinds _     _          = EQ
+
+  compareDepth (C _ y1) (C _ y2) = compare y2 y1
 
 -- | Draw a piece at the given hex coordinates.
 drawPieceAt                    :: Maybe (Float, Transition) -> Coord -> Piece -> Picture
@@ -223,13 +235,14 @@ drawCursor g c
                                   , drawPieceAt Nothing c (Piece (turn g) Ring)
                                   ]
 
+drawCursor g c
+  | Just p <- Map.lookup c $ board g
+  , piecePlayer p == turn g
+  , pieceKind p == Ring          = drawPieceAt Nothing c (Piece (turn g) Solid)
+
 drawCursor g c                  = translateC c
-                                $ color col
+                                $ color cursorColor
                                 $ circleSolid solidRadius
-  where col = case Map.lookup c (board g) of
-                Just p | pieceKind p == Ring && piecePlayer p == turn g
-                                  -> playerToColor (turn g)
-                _ -> cursorColor
 
 
 -- | Draw a game piece at the origin.
@@ -249,9 +262,11 @@ drawPiece mbTrans p             = trans token
     _                          -> id
 
   token = case (pieceKind p,mbTrans) of
-    (Ring,_)                   -> color cfront $ thickCircle ringRadius ringWidth
-    (Solid, Just (t,Flipping)) -> drawToken solidRadius 10 cback cfront blank (pi/2 * (t - flipTime/2)/flipTime)
-    (Solid, _                ) -> drawToken solidRadius 10 cback cfront blank (-pi/2)
+    (Ring,_)                   -> drawRing cfront ringRadius ringWidth
+    (Solid, Just (t,Flipping)) -> unaspect $ drawToken solidRadius ringWidth cback cfront blank (-5/6*pi + 2/3*pi*t/flipTime)
+    (Solid, _                ) -> unaspect $ drawToken solidRadius ringWidth cfront cback blank (pi/6)
+
+  unaspect                      = scale (recip (sqrt (3/2))) (sqrt 2)
 
 
 travelTime                     :: Coord -> Float
@@ -297,8 +312,10 @@ coordPoint (C x y)              = (sqrt 3 / 2 * gridSize * xf,
 pointCoord                     :: Point -> Coord
 pointCoord (x,y)                = C (round xc) (round yc)
   where
-  xc                            = 2/(gridSize*sqrt 3) * x
-  yc                            = y/gridSize-xc/2
+  xc                            = 2/(gridSize*sqrt 3) * (x / sqrt (3/2))
+  yc                            = (y*sqrt 2)/gridSize-xc/2
+
+-- drawGameState s                 = scale (sqrt (3/2)) (1/sqrt 2) $ fold
 
 -- | Static image of the hexagonal board.
 hexGridPicture                 :: Picture

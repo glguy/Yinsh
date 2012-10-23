@@ -1,11 +1,11 @@
-module DrawToken (drawToken) where
+module DrawToken (drawToken,drawRing) where
 
 import Graphics.Gloss.Data.Picture
 import Graphics.Gloss.Data.Color
 import Data.Monoid ((<>))
 
 drawToken :: Float -> Float -> Color -> Color -> Picture -> Float -> Picture
-drawToken radius thickness c1 c2 surface s = rotate (360/pi*s) $ pictures xs'
+drawToken radius thickness c1 c2 surface s = translate 0 (thickness/2) $ rotate 90 $ pictures xs'
   where
   w = thickness * cos s
 
@@ -37,3 +37,16 @@ drawToken radius thickness c1 c2 surface s = rotate (360/pi*s) $ pictures xs'
           , surface
           ]
        | s < 0 ]
+
+drawRing cfront ringRadius ringWidth =
+  pictures
+   [ color cfront $ pictures
+       [ thickCircle ringRadius ringWidth
+       , translate ringRadius    (ringWidth/2) $ rectangleSolid ringWidth ringWidth
+       , translate (-ringRadius) (ringWidth/2) $ rectangleSolid ringWidth ringWidth
+       ]
+   ,translate 0 ringWidth $
+        color cfront (thickCircle ringRadius ringWidth)
+      <> color (light cfront) (circle (ringRadius - ringWidth / 2))
+      <> color (light cfront) (circle (ringRadius + ringWidth / 2))
+   ]
