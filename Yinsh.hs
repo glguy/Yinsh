@@ -39,7 +39,7 @@ ringWidth       = 7
 solidRadius     = 20
 timerLength     = 60 -- seconds
 animationSpeed  = 200 -- pixels per second
-flipTime        = 0.25
+flipTime        = 0.5
 turnIndicatorCoord = C (-5) 7
 windowSize      = (900,600)
 windowLocation  = (10,10)
@@ -287,7 +287,7 @@ drawPiece mbTrans p             = trans token
 
   token = case (pieceKind p,mbTrans) of
     (Ring,_)                   -> drawRing cfront ringRadius ringWidth
-    (Solid, Just (t,Flipping)) -> unaspect $ drawToken solidRadius (ringWidth/2) cback cfront blank (-5/6*pi + 2/3*pi*t/flipTime)
+    (Solid, Just (t,Flipping)) -> unaspect $ drawToken solidRadius (ringWidth/2) cback cfront blank (-5/6*pi + pi*t/flipTime)
     (Solid, _                ) -> unaspect $ drawToken solidRadius (ringWidth/2) cfront cback blank (pi/6)
 
   unaspect                      = scale (recip (sqrt (3/2))) (sqrt 2)
