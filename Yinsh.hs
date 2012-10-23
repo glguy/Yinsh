@@ -263,8 +263,8 @@ drawPiece mbTrans p             = trans token
 
   token = case (pieceKind p,mbTrans) of
     (Ring,_)                   -> drawRing cfront ringRadius ringWidth
-    (Solid, Just (t,Flipping)) -> unaspect $ drawToken solidRadius ringWidth cback cfront blank (-5/6*pi + 2/3*pi*t/flipTime)
-    (Solid, _                ) -> unaspect $ drawToken solidRadius ringWidth cfront cback blank (pi/6)
+    (Solid, Just (t,Flipping)) -> unaspect $ drawToken solidRadius (ringWidth/2) cback cfront blank (-5/6*pi + 2/3*pi*t/flipTime)
+    (Solid, _                ) -> unaspect $ drawToken solidRadius (ringWidth/2) cfront cback blank (pi/6)
 
   unaspect                      = scale (recip (sqrt (3/2))) (sqrt 2)
 
