@@ -33,7 +33,7 @@ startingPlayer  = White
 playerToColor Black = black
 playerToColor White = makeColor8 214 51 157 255 -- pinkish
 cursorColor         = cyan
-gridSize        = 70
+gridSize        = 74
 ringRadius      = 30
 ringWidth       = 7
 solidRadius     = 20
@@ -41,7 +41,7 @@ timerLength     = 60 -- seconds
 animationSpeed  = 200 -- pixels per second
 flipTime        = 0.25
 turnIndicatorCoord = C (-5) 7
-windowSize      = (850,600)
+windowSize      = (900,600)
 windowLocation  = (10,10)
 windowTitle     = "Yinsh"
 
@@ -197,7 +197,8 @@ drawPickFive _                  = blank
 
 -- | Draw the marker used to indicate that a piece is chosen for removal.
 drawMarker                     :: Coord -> Picture
-drawMarker coord                = translateC coord
+drawMarker coord                = translate 0 ringWidth
+                                $ translateC coord
                                 $ color yellow
                                 $ rotate 45    bar
                                <> rotate (-45) bar
