@@ -74,6 +74,8 @@ data GameState = GameState
   , whiteScore  :: Int
   , blackScore  :: Int
   , timer       :: Float
+  , history     :: Maybe GameState
+  , future      :: Maybe GameState
   }
 
 data Transition = Moving Coord | Preflip | Flipping | Ghosted deriving (Show)
@@ -98,6 +100,8 @@ initialGameState = GameState
   , whiteScore  = 0
   , blackScore  = 0
   , timer       = 0
+  , history     = Nothing
+  , future      = Nothing
   }
 
 main                            = play (InWindow windowTitle windowSize windowLocation)
@@ -123,6 +127,12 @@ handleEvents (EventKey (MouseButton LeftButton) Down _ pt) s
   | inBounds c                  = playMove c s
   where
   c                             = pointCoord pt
+
+handleEvents (EventKey (SpecialKey KeyLeft) Down _ _) s
+  | Just prev <- history s      = prev { future = Just s }
+
+handleEvents (EventKey (SpecialKey KeyRight) Down _ _) s
+  | Just next <- future s       = next
 
 handleEvents _ s                = s
 
@@ -368,21 +378,18 @@ playMove c s =
   case mode s of
     Setup n | clickedPiece == Nothing
                                -> endSetupTurn n
-                                  s { board = Map.insert c (Piece me Ring)
+                                  s' { board = Map.insert c (Piece me Ring)
                                             $ board s
                                     , turn  = toggleTurn me
                                     , timer = 0
                                     }
 
     PickRing | clickedPiece == Just (Piece me Ring)
-                               -> s { mode = PlaceRing c }
-
-    PlaceRing _ | clickedPiece == Just (Piece me Ring)
-                               -> s { mode = PlaceRing c }
+                               -> s' { mode = PlaceRing c }
 
     PlaceRing ring | clickedPiece == Nothing && legalMove ring c (board s)
                                -> endTurn PostTurn
-                                  s { board = Map.insert ring (Piece me Solid)
+                                  s' { board = Map.insert ring (Piece me Solid)
                                             $ Map.insert c    (Piece me Ring)
                                             $ flipThrough affected
                                             $ board s
@@ -392,17 +399,18 @@ playMove c s =
                         where affected = movesThrough ring c
 
     RemoveFive phase chosen | clickedPiece == Just (Piece me Solid)
-                               -> removeFiveLogic phase s
+                               -> removeFiveLogic phase s -- pass in non-history version
                                 $ toggleMembership c chosen
 
     RemoveRing phase | clickedPiece == Just (Piece me Ring)
                                -> endTurn phase
                                 $ incScore
-                                  s { board = Map.delete c $ board s }
+                                  s' { board = Map.delete c $ board s }
 
     _                          -> s -- ignore all other selections
 
   where
+  s'                            = recordHistory s
   me                            = turn s
   clickedPiece                  = Map.lookup c $ board s
 
@@ -447,6 +455,9 @@ endTurn phase s
   | otherwise                   = endTurn PreTurn
                                   s { timer = 0, turn = toggleTurn $ turn s }
 
+recordHistory                  :: GameState -> GameState
+recordHistory s                 = s { history = Just s, future = Nothing }
+
 -- | Search the board for a run of solid pieces long enough
 -- to be removed and owned by the specified player
 hasRun                         :: Player -> Map Coord Piece -> Bool
@@ -480,7 +491,8 @@ testChosenGroup xs              = Set.size xs == goalRunLength
 -- remove it from the board and advance the game.
 removeFiveLogic                :: Phase -> GameState -> Set Coord -> GameState
 removeFiveLogic phase s chosen
-  | testChosenGroup chosen      = s { mode      = RemoveRing phase
+  | testChosenGroup chosen      = (recordHistory s)
+                                    { mode      = RemoveRing phase
                                     , board     = deleteMany chosen $ board s
                                     }
   | otherwise                   = s { mode      = RemoveFive phase chosen }
