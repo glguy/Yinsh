@@ -30,7 +30,7 @@ startingPlayer  = White
 -- Game rendering parameters
 --
 
-playerToColor Black = black
+playerToColor Black = makeColor8 15 138 66 255
 playerToColor White = makeColor8 214 51 157 255 -- pinkish
 cursorColor         = cyan
 gridSize        = 74
@@ -287,7 +287,7 @@ drawPiece mbTrans p             = trans token
 
   token = case (pieceKind p,mbTrans) of
     (Ring,_)                   -> drawRing cfront ringRadius ringWidth
-    (Solid, Just (t,Flipping)) -> unaspect $ drawToken solidRadius (ringWidth/2) cback cfront blank (-5/6*pi + pi*t/flipTime)
+    (Solid, Just (t,Flipping)) -> unaspect $ drawToken solidRadius (ringWidth/2) cback cfront blank (pi*(t/flipTime-5/6))
     (Solid, _                ) -> unaspect $ drawToken solidRadius (ringWidth/2) cfront cback blank (pi/6)
 
   unaspect                      = scale (recip (sqrt (3/2))) (sqrt 2)
@@ -399,7 +399,7 @@ playMove c s =
                         where affected = movesThrough ring c
 
     RemoveFive phase chosen | clickedPiece == Just (Piece me Solid)
-                               -> removeFiveLogic phase s -- pass in non-history version
+                               -> removeFiveLogic phase s'
                                 $ toggleMembership c chosen
 
     RemoveRing phase | clickedPiece == Just (Piece me Ring)
@@ -407,7 +407,7 @@ playMove c s =
                                 $ incScore
                                   s' { board = Map.delete c $ board s }
 
-    _                          -> s -- ignore all other selections
+    _                          -> s -- ignore all other selections, don't update history
 
   where
   s'                            = recordHistory s
@@ -491,8 +491,7 @@ testChosenGroup xs              = Set.size xs == goalRunLength
 -- remove it from the board and advance the game.
 removeFiveLogic                :: Phase -> GameState -> Set Coord -> GameState
 removeFiveLogic phase s chosen
-  | testChosenGroup chosen      = (recordHistory s)
-                                    { mode      = RemoveRing phase
+  | testChosenGroup chosen      = s { mode      = RemoveRing phase
                                     , board     = deleteMany chosen $ board s
                                     }
   | otherwise                   = s { mode      = RemoveFive phase chosen }
