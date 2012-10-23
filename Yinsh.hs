@@ -76,7 +76,7 @@ data GameState = GameState
   , timer       :: Float
   }
 
-data Transition = Moving Coord | Preflip | Flipping deriving (Show)
+data Transition = Moving Coord | Preflip | Flipping | Ghosted deriving (Show)
 
 data Phase = PreTurn | PostTurn deriving Eq
 
@@ -141,6 +141,7 @@ tickTransition elapsed (x, y)
 isPreflip                      :: Transition -> Bool
 isPreflip Preflip               = True
 isPreflip _                     = False
+
 --
 -- Game rendering
 --
@@ -203,7 +204,7 @@ drawMarker coord                = translate 0 ringWidth
                                 $ rotate 45    bar
                                <> rotate (-45) bar
   where
-  bar                           = rectangleSolid 10 25
+  bar                           = rectangleSolid  7 22
 
 -- | Draw all the pieces on the board.
 drawBoard                      :: GameState -> Picture
@@ -214,12 +215,13 @@ drawBoard s                     = foldMap (uncurry drawWithTransition)
 pieceDrawOrder                 :: (Coord, Piece) -> (Coord, Piece) -> Ordering
 pieceDrawOrder (c1,p1) (c2,p2)  = compareKinds (pieceKind p1) (pieceKind p2)
                                <> compareDepth c1 c2
+                               <> compareDepth c1 c2
   where
   compareKinds Solid Ring       = LT
   compareKinds Ring  Solid      = GT
   compareKinds _     _          = EQ
 
-  compareDepth (C _ y1) (C _ y2) = compare y2 y1
+  compareDepth (C x1 y1) (C x2 y2) = compare y2 y1 <> compare x2 x1
 
 -- | Draw a piece at the given hex coordinates.
 drawPieceAt                    :: Maybe (Float, Transition) -> Coord -> Piece -> Picture
@@ -232,14 +234,21 @@ drawCursor g c
   | PlaceRing ring <- mode g
   , legalMove ring c (board g) = pictures
                                   [ color cursorColor
-                                  $ thickLine 5 [ coordPoint ring, coordPoint c ]
-                                  , drawPieceAt Nothing c (Piece (turn g) Ring)
+                                  $ thickLine 10 [ coordPoint ring, coordPoint c ]
+                                    <> (translateC c
+                                        $ rotate (negate (radToDeg (argV (coordPoint c `subV` coordPoint ring))))
+                                        $ polygon [ (3,0), (-7 , 10 * sqrt 3), (-7 , -10* sqrt 3) ])
+                                  , drawPieceAt (Just (0, Ghosted)) c (Piece (turn g) Ring)
                                   ]
-
 drawCursor g c
-  | Just p <- Map.lookup c $ board g
+  | Setup {} <- mode g
+  , Nothing  <- Map.lookup c $ board g
+                                = drawPieceAt (Just (0, Ghosted)) c (Piece (turn g) Ring)
+drawCursor g c
+  | PickRing <- mode g
+  , Just p <- Map.lookup c $ board g
   , piecePlayer p == turn g
-  , pieceKind p == Ring          = drawPieceAt Nothing c (Piece (turn g) Solid)
+  , Ring <- pieceKind p         = drawPieceAt (Just (0, Ghosted)) c (Piece (turn g) Solid)
 
 drawCursor g c                  = translateC c
                                 $ color cursorColor
@@ -254,8 +263,12 @@ drawPiece mbTrans p             = trans token
                                     Just (_,Preflip)       -> toggleTurn $ piecePlayer p
                                     _                      -> piecePlayer p
 
-  cfront                        = playerToColor player
-  cback                         = playerToColor $ toggleTurn player
+  colorMod = case mbTrans of
+    Just (_, Ghosted)          -> light . light
+    _                          -> id
+
+  cfront                        = colorMod $ playerToColor player
+  cback                         = colorMod $ playerToColor $ toggleTurn player
 
   trans = case mbTrans of
     Just (t, Moving c)         -> let total = travelTime c
