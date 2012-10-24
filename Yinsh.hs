@@ -33,15 +33,15 @@ startingPlayer  = White
 playerToColor Black = makeColor8 15 138 66 255
 playerToColor White = makeColor8 214 51 157 255 -- pinkish
 cursorColor         = cyan
-gridSize        = 74
-ringRadius      = 30
-ringWidth       = 7
-solidRadius     = 20
+gridSize        = 80
+ringRadius      = 34
+ringWidth       = 8
+solidRadius     = 26
 timerLength     = 60 -- seconds
 animationSpeed  = 200 -- pixels per second
 flipTime        = 0.5
 turnIndicatorCoord = C (-5) 7
-windowSize      = (900,600)
+windowSize      = (950,600)
 windowLocation  = (10,10)
 windowTitle     = "Yinsh"
 
@@ -139,8 +139,10 @@ handleEvents _ s                = s
 -- | Advance the timers by the given elapsed time.
 handleTick                     :: Float -> GameState -> GameState
 handleTick elapsed s            = s { timer = elapsed + timer s
-                                    , transitions = Map.mapMaybe (tickTransition elapsed)
-                                                  $ transitions s }
+                                    , transitions =
+                                       Map.mapMaybe (tickTransition elapsed)
+                                       $ transitions s
+                                    }
 
 tickTransition                 :: Float -> (Float, Transition) -> Maybe (Float, Transition)
 tickTransition elapsed (x, y)
@@ -173,14 +175,17 @@ drawGameState s                 = scale (sqrt (3/2)) (1/sqrt 2) $ fold
 -- | Draw a timer in the bottom of the screen to indicate how long a player's
 -- turn has been going.
 drawTimer                      :: Float -> Picture
-drawTimer seconds               = translateC (C 5 (-7)) $ timers seconds timerColors
+drawTimer seconds               = translateC (C 5 (-7))
+                                $ timers seconds timerColors
   where
   timerColors = [yellow,orange,red]
 
   timers _ []                   = blank
   timers n (c:cs)
-    | n < timerLength           = color c $ arcSolid 0 (n / timerLength * 360) solidRadius
-    | otherwise                 = color c (circleSolid solidRadius) <> timers (n-timerLength) cs
+    | n < timerLength           = color c
+                                $ arcSolid 0 (n/timerLength * 360) solidRadius
+    | otherwise                 = color c (circleSolid solidRadius)
+                               <> timers (n-timerLength) cs
 
 -- | Draw the rings indicating how many rings the player has removed.
 drawScore                      :: Player -> Int -> Picture
@@ -242,23 +247,33 @@ drawPieceAt mbTrans c           = translateC c . drawPiece mbTrans
 drawCursor                     :: GameState -> Coord -> Picture
 drawCursor g c
   | PlaceRing ring <- mode g
-  , legalMove ring c (board g) = pictures
-                                  [ color cursorColor
-                                  $ thickLine 10 [ coordPoint ring, coordPoint c ]
-                                    <> (translateC c
-                                        $ rotate (negate (radToDeg (argV (coordPoint c `subV` coordPoint ring))))
-                                        $ polygon [ (3,0), (-7 , 10 * sqrt 3), (-7 , -10* sqrt 3) ])
-                                  , drawPieceAt (Just (0, Ghosted)) c (Piece (turn g) Ring)
-                                  ]
+  , legalMove ring c (board g)  = let delta = coordPoint c `subV`
+                                              coordPoint ring
+                                      clockwiseHeading = negate $ radToDeg
+                                                       $ argV delta
+                                in pictures
+                                [ color cursorColor
+                                $ thickLine 10 [coordPoint ring, coordPoint c ]
+                               <> (translateC c
+                                   $ rotate clockwiseHeading
+                                   $ polygon arrowHead)
+                                , drawPieceAt (Just (0, Ghosted)) c
+                                $ Piece (turn g) Ring
+                                ]
+  where
+  arrowHead                     = [ (3,0), (-7,10*sqrt 3), (-7 , -10* sqrt 3)]
+
 drawCursor g c
   | Setup {} <- mode g
   , Nothing  <- Map.lookup c $ board g
-                                = drawPieceAt (Just (0, Ghosted)) c (Piece (turn g) Ring)
+                                = drawPieceAt (Just (0, Ghosted)) c
+                                $ Piece (turn g) Ring
 drawCursor g c
   | PickRing <- mode g
   , Just p <- Map.lookup c $ board g
   , piecePlayer p == turn g
-  , Ring <- pieceKind p         = drawPieceAt (Just (0, Ghosted)) c (Piece (turn g) Solid)
+  , Ring <- pieceKind p         = drawPieceAt (Just (0, Ghosted)) c
+                                $ Piece (turn g) Solid
 
 drawCursor g c                  = translateC c
                                 $ color cursorColor
@@ -270,8 +285,8 @@ drawPiece                      :: Maybe (Float, Transition) -> Piece -> Picture
 drawPiece mbTrans p             = trans token
   where
   player                        = case mbTrans of
-                                    Just (_,Preflip)       -> toggleTurn $ piecePlayer p
-                                    _                      -> piecePlayer p
+                                    Just (_,Preflip) -> toggleTurn $ piecePlayer p
+                                    _                -> piecePlayer p
 
   colorMod = case mbTrans of
     Just (_, Ghosted)          -> light . light
@@ -281,16 +296,22 @@ drawPiece mbTrans p             = trans token
   cback                         = colorMod $ playerToColor $ toggleTurn player
 
   trans = case mbTrans of
-    Just (t, Moving c)         -> let total = travelTime c
-                                  in uncurry translate (mulSV (t/total) (coordPoint c))
+    Just (t, Moving c)         -> let total   = travelTime c
+                                      (dx,dy) = mulSV (t/total) (coordPoint c)
+                                  in translate dx dy
     _                          -> id
 
   token = case (pieceKind p,mbTrans) of
     (Ring,_)                   -> drawRing cfront ringRadius ringWidth
-    (Solid, Just (t,Flipping)) -> unaspect $ drawToken solidRadius (ringWidth/2) cback cfront blank (pi*(t/flipTime-5/6))
-    (Solid, _                ) -> unaspect $ drawToken solidRadius (ringWidth/2) cfront cback blank (pi/6)
-
-  unaspect                      = scale (recip (sqrt (3/2))) (sqrt 2)
+    (Solid, Just (t,Flipping)) -> unaspect
+                                $ drawToken solidRadius (ringWidth/2)
+                                     cfront cback blank
+                                     (pi/flipTime*t+isometricAngle)
+    (Solid, _                ) -> unaspect
+                                $ drawToken solidRadius (ringWidth/2)
+                                     cfront cback blank isometricAngle
+  isometricAngle                = atan (1 / sqrt 2)
+  unaspect                      = scale (sqrt (2/3)) (sqrt 2)
 
 
 travelTime                     :: Coord -> Float

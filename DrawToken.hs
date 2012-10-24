@@ -9,7 +9,7 @@ drawToken radius thickness c1 c2 surface s = translate 0 (thickness/2) $ rotate 
   where
   w = thickness * cos s
 
-  xs' | s < 0     = xs
+  xs' | s > pi    = xs
       | otherwise = reverse xs
 
   center = case compare 0 s of
@@ -23,7 +23,7 @@ drawToken radius thickness c1 c2 surface s = translate 0 (thickness/2) $ rotate 
                              <> circle radius
            , surface
            ]
-       | s > 0] ++
+       | s < pi] ++
        [ color c1 $ translate (-w)   0 $ scale (sin s) 1 $ circleSolid radius
        , color c1 $ translate (-w/2) 0 $ scale (cos s) 1 $ rectangleSolid thickness (2*radius)
        ] ++
@@ -36,7 +36,7 @@ drawToken radius thickness c1 c2 surface s = translate 0 (thickness/2) $ rotate 
                             <> circle radius
           , surface
           ]
-       | s < 0 ]
+       | s > pi ]
 
 drawRing cfront ringRadius ringWidth =
   pictures
