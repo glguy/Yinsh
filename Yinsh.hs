@@ -129,7 +129,7 @@ handleEvents (EventKey (MouseButton LeftButton) Down _ pt) s
   c                             = pointCoord pt
 
 handleEvents (EventKey (SpecialKey KeyLeft) Down _ _) s
-  | Just prev <- history s      = prev { future = Just s }
+  | Just prev <- history s      = prev { future = Just s { transitions = Map.empty } }
 
 handleEvents (EventKey (SpecialKey KeyRight) Down _ _) s
   | Just next <- future s       = next
@@ -477,7 +477,8 @@ endTurn phase s
                                   s { timer = 0, turn = toggleTurn $ turn s }
 
 recordHistory                  :: GameState -> GameState
-recordHistory s                 = s { history = Just s, future = Nothing }
+recordHistory s                 = s { history = Just s { transitions = Map.empty }
+                                    , future = Nothing }
 
 -- | Search the board for a run of solid pieces long enough
 -- to be removed and owned by the specified player
