@@ -275,6 +275,22 @@ drawCursor g c
   , Ring <- pieceKind p         = drawPieceAt (Just (0, Ghosted)) c
                                 $ Piece (turn g) Solid
 
+drawCursor g c
+  | RemoveFive _ selected <- mode g
+  , Just p <- Map.lookup c $ board g
+  , piecePlayer p == turn g
+  , Solid <- pieceKind p        = translateC c
+                                $ color orange
+                                $ circleSolid (ringWidth + solidRadius)
+
+drawCursor g c
+  | RemoveRing _ <- mode g
+  , Just p <- Map.lookup c $ board g
+  , piecePlayer p == turn g
+  , Ring <- pieceKind p         = translateC c
+                                $ color orange
+                                $ circleSolid (ringWidth + solidRadius)
+
 drawCursor g c                  = translateC c
                                 $ color cursorColor
                                 $ circleSolid solidRadius
