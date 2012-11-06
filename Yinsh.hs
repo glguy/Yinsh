@@ -8,10 +8,18 @@ import Data.Monoid ((<>))
 import Data.Set (Set)
 import Graphics.Gloss.Data.Vector (mulSV, argV, magV)
 import Graphics.Gloss.Geometry.Angle (radToDeg)
+import Graphics.Gloss.Interface.IO.Game(playIO)
 import Graphics.Gloss.Interface.Pure.Game
 import Prelude hiding (any)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import System.IO(Handle,hPrint,hGetLine,hPutStrLn,stderr)
+import Network(connectTo, accept, listenOn, PortID(..), PortNumber)
+import Control.Concurrent(forkIO)
+import Control.Monad(forever, when, guard)
+import Data.Maybe(isNothing, fromMaybe)
+import Data.IORef(IORef, newIORef, readIORef, atomicModifyIORef', writeIORef)
+import System.Environment(getArgs)
 
 import DrawToken
 
@@ -51,7 +59,7 @@ windowTitle     = "Yinsh"
 
 -- | Location on the hex grid
 data Coord = C Int Int
-  deriving (Ord, Eq, Show)
+  deriving (Ord, Eq, Show, Read)
 
 data Player = Black | White
   deriving (Eq)
@@ -104,19 +112,94 @@ initialGameState = GameState
   , future      = Nothing
   }
 
-main                            = play (InWindow windowTitle windowSize windowLocation)
-                                       white
-                                       30
-                                       initialGameState
-                                       drawGameState
-                                       handleEvents
-                                       handleTick
+main =
+  do as <- getArgs
+     case as of
+       [] -> playLocal
+       ["server"] -> playNetwork Nothing
+       [x]        -> playNetwork (Just x)
+       _          -> hPutStrLn stderr $ unlines
+                        [ "Parameters:"
+                        , "  (none)     Start a local game"
+                        , "  serevr     Act as the server for a network game."
+                        , "  HOST       Act as the client for a network game."
+                        ]
+
+playLocal :: IO ()
+playLocal = play (InWindow windowTitle windowSize windowLocation)
+       white
+       30
+       initialGameState
+       drawGameState
+       handleEvents
+       handleTick
+
+defaultPort :: PortNumber
+defaultPort = 15005
+
+playNetwork :: Maybe String -> IO ()
+playNetwork mbClient =
+  do v <- newIORef initialGameState
+     h <- getHandle
+     _ <- forkIO $ forever $ otherPlayer h v
+     let p = if isNothing mbClient then White else Black
+     playIO (InWindow windowTitle windowSize windowLocation)
+       white
+       30
+       ()
+       (\_ -> drawGameState `fmap` readIORef v)
+       (\e _ -> handleEventsNet h p v e ())
+       (\f w -> atomicModifyIORef' v $ \s -> (handleTick f s, ()))
+
+
+  where
+  getHandle =
+    case mbClient of
+      Just host -> connectTo host (PortNumber defaultPort)
+      Nothing   -> do putStrLn $ "Listening on port " ++ show defaultPort
+                      (h,_,_) <- accept =<< listenOn (PortNumber defaultPort)
+                      return h
+
+  otherPlayer h v =
+    do txt <- hGetLine h
+       case reads txt of
+         [(PlayedAt c,"")] ->
+           readIORef v >>= \s ->
+           case playMove c s of
+             Just s' -> writeIORef v s'
+             Nothing -> return ()
+         _  -> fail $ "Invalid move: " ++ txt
+
+
 
 --
 -- Game event logic
 --
 
-handleEvents                   :: Event -> GameState -> GameState
+data NetMove  = PlayedAt Coord deriving (Read,Show)
+
+
+handleEventsNet :: Handle -> Player -> IORef GameState -> Event -> () -> IO ()
+handleEventsNet h p v e _ =
+  do s <- readIORef v
+     when (turn s == p) $
+       case e of
+         EventMotion pt ->
+            let c = pointCoord pt
+            in writeIORef v s { cursor = guard (inBounds c) >> return c }
+         EventKey (MouseButton LeftButton) Down _ pt ->
+            do let c = pointCoord pt
+               when (inBounds c) $
+                 case playMove c s of
+                   Nothing -> return ()
+                   Just s' -> do writeIORef v s'
+                                 hPrint h (PlayedAt c)
+         _ -> return ()
+
+
+
+
+handleEvents                  :: Event -> GameState -> GameState
 handleEvents (EventMotion pt) s
   | inBounds c                  = s { cursor = Just c }
   | otherwise                   = s { cursor = Nothing }
@@ -124,7 +207,7 @@ handleEvents (EventMotion pt) s
   c                             = pointCoord pt
 
 handleEvents (EventKey (MouseButton LeftButton) Down _ pt) s
-  | inBounds c                  = playMove c s
+  | inBounds c                  = fromMaybe s (playMove c s)
   where
   c                             = pointCoord pt
 
@@ -409,12 +492,13 @@ lineC                           = line . map coordPoint
 -- Game rules
 --
 
+
 -- | Update the game state given a selected coordinate.
-playMove                       :: Coord -> GameState -> GameState
+playMove                       :: Coord -> GameState -> Maybe GameState
 playMove c s =
   case mode s of
     Setup n | clickedPiece == Nothing
-                               -> endSetupTurn n
+                               -> Just $ endSetupTurn n
                                   s' { board = Map.insert c (Piece me Ring)
                                             $ board s
                                     , turn  = toggleTurn me
@@ -422,10 +506,10 @@ playMove c s =
                                     }
 
     PickRing | clickedPiece == Just (Piece me Ring)
-                               -> s' { mode = PlaceRing c }
+                               -> Just s' { mode = PlaceRing c }
 
     PlaceRing ring | clickedPiece == Nothing && legalMove ring c (board s)
-                               -> endTurn PostTurn
+                               -> Just $ endTurn PostTurn
                                   s' { board = Map.insert ring (Piece me Solid)
                                             $ Map.insert c    (Piece me Ring)
                                             $ flipThrough affected
@@ -436,15 +520,15 @@ playMove c s =
                         where affected = movesThrough ring c
 
     RemoveFive phase chosen | clickedPiece == Just (Piece me Solid)
-                               -> removeFiveLogic phase s'
+                               -> Just $ removeFiveLogic phase s'
                                 $ toggleMembership c chosen
 
     RemoveRing phase | clickedPiece == Just (Piece me Ring)
-                               -> endTurn phase
+                               -> Just $ endTurn phase
                                 $ incScore
                                   s' { board = Map.delete c $ board s }
 
-    _                          -> s -- ignore all other selections, don't update history
+    _                          -> Nothing
 
   where
   s'                            = recordHistory s
