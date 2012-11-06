@@ -13,7 +13,7 @@ import Graphics.Gloss.Interface.Pure.Game
 import Prelude hiding (any)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import System.IO(Handle,hPrint,hGetLine,hPutStrLn,stderr)
+import System.IO(Handle,hFlush,hPrint,hGetLine,hPutStrLn,stderr)
 import Network(connectTo, accept, listenOn, PortID(..), PortNumber)
 import Control.Concurrent(forkIO)
 import Control.Monad(forever, when, guard)
@@ -194,6 +194,7 @@ handleEventsNet h p v e _ =
                    Nothing -> return ()
                    Just s' -> do writeIORef v s'
                                  hPrint h (PlayedAt c)
+                                 hFlush h
          _ -> return ()
 
 
