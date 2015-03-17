@@ -38,8 +38,8 @@ startingPlayer  = White
 -- Game rendering parameters
 --
 
-playerToColor Black = makeColor8 15 138 66 255
-playerToColor White = makeColor8 214 51 157 255 -- pinkish
+playerToColor Black = makeColorI 15 138 66 255
+playerToColor White = makeColorI 214 51 157 255 -- pinkish
 cursorColor         = cyan
 gridSize        = 80
 ringRadius      = 34
@@ -121,7 +121,7 @@ main =
        _          -> hPutStrLn stderr $ unlines
                         [ "Parameters:"
                         , "  (none)     Start a local game"
-                        , "  serevr     Act as the server for a network game."
+                        , "  server     Act as the server for a network game."
                         , "  HOST       Act as the client for a network game."
                         ]
 
@@ -464,7 +464,7 @@ pointCoord (x,y)                = C (round xc) (round yc)
 
 -- | Static image of the hexagonal board.
 hexGridPicture                 :: Picture
-hexGridPicture                  = color (makeColor8 0 0 0 50)
+hexGridPicture                  = color (makeColorI 0 0 0 50)
                                 $ foldMap rotate [0, 60, 120]
                                 $ pictures
                                 [ lineC [C x colLo, C x colHi]
